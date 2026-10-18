@@ -29,6 +29,11 @@ These paths compile, but still need interactive comparison against TextEdit for 
 
 These changes compile, but printing/PDF pagination, restoration across relaunch, and RTFD round trips for complex lists/tables/multiple attachments still need end-to-end comparison on macOS.
 
+## Saved document versions
+
+- `TextDocument` explicitly enables AppKit version preservation, and File > Browse All Versions opens the system document version browser. The item is managed by `NSDocument`, so documents without a saved URL or version history are disabled by AppKit.
+- Version creation and restore behavior depend on the destination file system and require a saved document. The system browser still needs an interactive check with local files and autosaved edits.
+
 ## Settings stored by this implementation
 
 The controls use the app's own defaults domain. Values do not modify `com.apple.TextEdit` preferences. A missing value uses the default shown here.
@@ -61,4 +66,4 @@ The controls use the app's own defaults domain. Values do not modify `com.apple.
 
 ## Remaining parity work
 
-This is a working editor, not a 1:1 TextEdit replacement. The current comparison does not cover document versions, full restoration of prior windows and unsaved documents, TextEdit's first-run and default window states, all menu enablement and shortcuts, exact toolbar customization, exact font and page metrics, all encoding fallback cases, complex RTFD layout fidelity, or malformed-document recovery. Printing, PDF pagination, state restoration, and richer RTFD content have implementation paths but still need end-to-end comparison. DOC/ODT/WordML/web-archive behavior has not been fully measured in the running TextEdit app. Plain-text dimensions are pixel approximations based on character and line counts. The settings UI and menu wording are approximations and the app uses its own preference domain. XHTML output and whitespace preservation still need broad document validation.
+This is a working editor, not a 1:1 TextEdit replacement. The current comparison does not cover full restoration of prior windows and unsaved documents, TextEdit's first-run and default window states, all menu enablement and shortcuts, exact toolbar customization, exact font and page metrics, all encoding fallback cases, complex RTFD layout fidelity, or malformed-document recovery. Printing, PDF pagination, state restoration, saved document versions, and richer RTFD content have implementation paths but still need end-to-end comparison. DOC/ODT/WordML/web-archive behavior has not been fully measured in the running TextEdit app. Plain-text dimensions are pixel approximations based on character and line counts. The settings UI and menu wording are approximations and the app uses its own preference domain. XHTML output and whitespace preservation still need broad document validation.

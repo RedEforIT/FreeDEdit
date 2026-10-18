@@ -76,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         fileMenu.addItem(withTitle: "Rename…", action: #selector(NSDocument.rename(_:)), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Move To…", action: #selector(NSDocument.move(_:)), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Revert to Saved", action: Selector("revertDocumentToSaved:"), keyEquivalent: "")
+        fileMenu.addItem(withTitle: "Browse All Versions…", action: #selector(NSDocument.browseVersions(_:)), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Export as PDF…", action: #selector(TextDocument.exportPDF(_:)), keyEquivalent: "")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Page Setup…", action: Selector("runPageLayout:"), keyEquivalent: "")
@@ -605,6 +606,7 @@ final class TextDocument: NSDocument {
     ]
 
     override class var autosavesInPlace: Bool { true }
+    override class var preservesVersions: Bool { true }
     override class var readableTypes: [String] {
         [UTType.plainText.identifier, UTType.rtf.identifier, "com.apple.rtfd", UTType.html.identifier,
          "com.apple.webarchive", "org.oasis-open.opendocument.text",
