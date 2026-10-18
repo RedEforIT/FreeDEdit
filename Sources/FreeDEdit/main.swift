@@ -155,10 +155,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let formatMenu = NSMenu(title: "Format")
         formatMenu.delegate = self
         formatMenu.autoenablesItems = false
-        let richItem = NSMenuItem(title: "Make Rich Text", action: #selector(TextDocument.makeRichText(_:)), keyEquivalent: "t")
-        formatMenu.addItem(richItem)
-        let plainItem = NSMenuItem(title: "Make Plain Text", action: #selector(TextDocument.makePlainText(_:)), keyEquivalent: "T")
-        formatMenu.addItem(plainItem)
+        let richPlainItem = NSMenuItem(title: "Make Plain Text", action: #selector(TextDocument.toggleRichPlainText(_:)), keyEquivalent: "t")
+        richPlainItem.keyEquivalentModifierMask = [.command, .shift]
+        formatMenu.addItem(richPlainItem)
         formatMenu.addItem(.separator())
         for (title, selector, key) in [("Bold", "toggleBoldface:", "b"), ("Italic", "toggleItalics:", "i"), ("Underline", "underline:", "u")] {
             formatMenu.addItem(withTitle: title, action: Selector(selector), keyEquivalent: key)
@@ -439,8 +438,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for item in menu.items {
             let action = item.action.map(NSStringFromSelector) ?? ""
             switch action {
-            case "makeRichText:": item.isEnabled = !editor.isRichText && editor.isEditable
-            case "makePlainText:": item.isEnabled = editor.isRichText && editor.isEditable
+            case "toggleRichPlainText:":
+                item.isEnabled = editor.isEditable
+                item.title = editor.isRichText ? "Make Plain Text" : "Make Rich Text"
             case "toggleRuler:": item.isEnabled = editor.isRichText
             case "togglePageWrap:":
                 item.isEnabled = true
@@ -1077,6 +1077,12 @@ final class TextDocument: NSDocument {
         isPlainText = false
         text = editor.attributedString()
         updateChangeCount(.changeDone)
+    }
+
+    @objc func toggleRichPlainText(_ sender: Any?) {
+        guard let editor, editor.isEditable else { return }
+        if editor.isRichText { makePlainText(sender) }
+        else { makeRichText(sender) }
     }
 
     @objc func toggleRuler(_ sender: Any?) {
