@@ -10,4 +10,6 @@ The editing menu includes undo and redo, Cut, Copy, Paste, Paste and Match Style
 
 The formatting menu includes font and character styles, size changes, color selection, text alignment, paragraph direction, ruler controls, spacing, rich/plain conversion, editing protection, wrapping to page boundaries, hyphenation, vertical layout, lists, and tables. The toolbar and ruler shown in a rich-text document provide formatting and paragraph controls; plain-text documents omit the rich-text formatting toolbar and ruler.
 
+On macOS 15 and later, Format > Highlight contains Accent, Purple, Pink, Orange, Mint, and Blue choices. FreeDEdit currently approximates these with attributed-string background colors in its TextKit 1 editor; native TextKit 2 highlight semantics are not yet matched.
+
 The view menu offers window presentation commands. Exact key equivalents, every menu item's enabled/disabled conditions, window restoration, and behavior of the PDF, print, table, list, and find panels remain to be measured.

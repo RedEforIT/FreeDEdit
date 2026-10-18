@@ -169,6 +169,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         fontsItem.target = NSFontManager.shared
         formatMenu.addItem(fontsItem)
         formatMenu.addItem(withTitle: "Show Colors", action: #selector(NSApplication.orderFrontColorPanel(_:)), keyEquivalent: "")
+        if #available(macOS 15.0, *) {
+            let highlightItem = NSMenuItem(title: "Highlight", action: nil, keyEquivalent: "")
+            let highlightMenu = NSMenu(title: "Highlight")
+            highlightMenu.delegate = self
+            let highlightColors: [(String, NSColor)] = [
+                ("Accent", .controlAccentColor), ("Purple", .systemPurple), ("Pink", .systemPink),
+                ("Orange", .systemOrange), ("Mint", .systemMint), ("Blue", .systemBlue)
+            ]
+            for (title, color) in highlightColors {
+                let item = NSMenuItem(title: title, action: #selector(TextDocument.applyHighlight(_:)), keyEquivalent: "")
+                item.representedObject = color
+                highlightMenu.addItem(item)
+            }
+            highlightItem.submenu = highlightMenu
+            formatMenu.addItem(highlightItem)
+        }
         formatMenu.addItem(.separator())
         let alignment = NSMenuItem(title: "Text Alignment", action: nil, keyEquivalent: "")
         let alignmentMenu = NSMenu(title: "Text Alignment")
@@ -434,7 +450,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(withTitle: "Clear Menu", action: #selector(NSDocumentController.clearRecentDocuments(_:)), keyEquivalent: "")
             return
         }
-        guard let editor = (NSApp.keyWindow?.windowController?.document as? TextDocument)?.menuEditor else { return }
+        guard let document = NSApp.keyWindow?.windowController?.document as? TextDocument,
+              let editor = document.menuEditor else { return }
         let textViewActions: Set<String> = ["toggleBoldface:", "toggleItalics:", "underline:", "alignLeft:",
                                             "alignCenter:", "alignRight:", "alignJustified:"]
         menu.autoenablesItems = false
@@ -455,6 +472,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.isEnabled = editor.isEditable && editor.selectedRange().length > 0
             case "performFindPanelAction:" where item.tag == Int(NSFindPanelAction.setFindString.rawValue):
                 item.isEnabled = editor.selectedRange().length > 0
+            case "applyHighlight:":
+                item.target = document
+                item.isEnabled = editor.isRichText && editor.isEditable && editor.selectedRange().length > 0
             case "toggleRichPlainText:":
                 item.isEnabled = editor.isEditable
                 item.title = editor.isRichText ? "Make Plain Text" : "Make Rich Text"
@@ -1149,6 +1169,22 @@ final class TextDocument: NSDocument {
         editor.setSelectedRange(NSRange(location: location, length: length))
         text = editor.attributedString()
         isPlainText = !snapshot.isRichText
+    }
+
+    @objc func applyHighlight(_ sender: NSMenuItem) {
+        guard let editor, editor.isRichText, editor.isEditable,
+              let color = sender.representedObject as? NSColor else { return }
+        let highlightColor = color.withAlphaComponent(0.35)
+        let range = editor.selectedRange()
+        registerFormattingUndo(in: editor, range: range)
+        if range.length > 0 {
+            editor.textStorage?.addAttribute(.backgroundColor, value: highlightColor, range: range)
+        } else {
+            var attributes = editor.typingAttributes
+            attributes[.backgroundColor] = highlightColor
+            editor.typingAttributes = attributes
+        }
+        editor.didChangeText()
     }
 
     @objc func toggleRuler(_ sender: Any?) {
