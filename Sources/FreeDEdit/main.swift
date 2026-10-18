@@ -196,6 +196,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         kerningMenu.addItem(withTitle: "Use None", action: #selector(NSTextView.turnOffKerning(_:)), keyEquivalent: "")
         kerningItem.submenu = kerningMenu
         formatMenu.addItem(kerningItem)
+        let ligaturesItem = NSMenuItem(title: "Ligatures", action: nil, keyEquivalent: "")
+        let ligaturesMenu = NSMenu(title: "Ligatures")
+        ligaturesMenu.delegate = self
+        ligaturesMenu.addItem(withTitle: "Use Standard", action: #selector(NSTextView.useStandardLigatures(_:)), keyEquivalent: "")
+        ligaturesMenu.addItem(withTitle: "Use All", action: #selector(NSTextView.useAllLigatures(_:)), keyEquivalent: "")
+        ligaturesMenu.addItem(withTitle: "Use None", action: #selector(NSTextView.turnOffLigatures(_:)), keyEquivalent: "")
+        ligaturesItem.submenu = ligaturesMenu
+        formatMenu.addItem(ligaturesItem)
         if #available(macOS 15.0, *) {
             let highlightItem = NSMenuItem(title: "Highlight", action: nil, keyEquivalent: "")
             let highlightMenu = NSMenu(title: "Highlight")
@@ -526,6 +534,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "useStandardKerning:", "tightenKerning:", "loosenKerning:", "turnOffKerning:":
+                item.target = editor
+                item.isEnabled = editor.isRichText && editor.isEditable
+            case "useStandardLigatures:", "useAllLigatures:", "turnOffLigatures:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "toggleRichPlainText:":
