@@ -278,14 +278,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         openDocuments(panel.urls, options: options, at: 0)
     }
 
-    @MainActor private func openDocuments(_ urls: [URL], options: TextDocument.OpenOptions, at index: Int) {
-        guard urls.indices.contains(index) else { return }
+    @MainActor private func openDocuments(_ urls: [URL], options: TextDocument.OpenOptions, at index: Int,
+                                          completion: (() -> Void)? = nil) {
+        guard urls.indices.contains(index) else { completion?(); return }
+        let url = urls[index]
         TextDocument.pendingOpenOptions = options
-        NSDocumentController.shared.openDocument(withContentsOf: urls[index], display: true) { _, _, error in
+        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
             TextDocument.pendingOpenOptions = nil
-            if let error { NSApp.presentError(error) }
-            self.openDocuments(urls, options: options, at: index + 1)
+            if let error {
+                if let recoveryOptions = self.sourceRecoveryOptions(for: url, options: options) {
+                    self.openDocuments([url], options: recoveryOptions, at: 0) {
+                        self.openDocuments(urls, options: options, at: index + 1, completion: completion)
+                    }
+                } else {
+                    NSApp.presentError(error)
+                    self.openDocuments(urls, options: options, at: index + 1, completion: completion)
+                }
+                return
+            }
+            self.openDocuments(urls, options: options, at: index + 1, completion: completion)
         }
+    }
+
+    @MainActor private func sourceRecoveryOptions(for url: URL, options: TextDocument.OpenOptions) -> TextDocument.OpenOptions? {
+        guard !options.ignoreRichText, ["rtf", "rtfd", "html", "htm"].contains(url.pathExtension.lowercased()) else { return nil }
+        let alert = NSAlert()
+        alert.messageText = "Couldn’t read the document formatting"
+        alert.informativeText = "FreeDEdit can try to open the document’s readable source text instead. Formatting and embedded objects may be lost."
+        alert.addButton(withTitle: "Open Source Text")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        var recovery = options
+        recovery.ignoreRichText = true
+        return recovery
     }
 
     @MainActor @objc private func showFindReplace(_ sender: Any?) {
@@ -1104,6 +1129,19 @@ final class TextDocument: NSDocument {
 
     override func read(from fileWrapper: FileWrapper, ofType typeName: String) throws {
         guard typeName == "com.apple.rtfd" else { return try super.read(from: fileWrapper, ofType: typeName) }
+        if Self.pendingOpenOptions?.ignoreRichText == true {
+            let rtfData = fileWrapper.fileWrappers?["TXT.rtf"]?.regularFileContents
+                ?? fileWrapper.fileWrappers?.first(where: { $0.key.lowercased().hasSuffix(".rtf") })?.value.regularFileContents
+            guard let rtfData else {
+                throw NSError(domain: "FreeDEdit", code: 4,
+                              userInfo: [NSLocalizedDescriptionKey: "The RTFD package contains no readable RTF source."])
+            }
+            text = NSAttributedString(string: String(data: rtfData, encoding: .utf8) ?? String(decoding: rtfData, as: UTF8.self))
+            isPlainText = true
+            plainTextEncoding = .utf8
+            Self.pendingOpenOptions = nil
+            return
+        }
         guard let imported = try NSAttributedString(rtfdFileWrapper: fileWrapper, documentAttributes: nil) else {
             throw NSError(domain: "FreeDEdit", code: 2, userInfo: [NSLocalizedDescriptionKey: "The RTFD package could not be read."])
         }
