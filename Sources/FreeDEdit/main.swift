@@ -97,6 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Delete", action: Selector("delete:"), keyEquivalent: "")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         let insertBreaks = NSMenuItem(title: "Insert", action: nil, keyEquivalent: "")
         let breakMenu = NSMenu(title: "Insert")
@@ -445,6 +446,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "redo:":
                 item.title = editor.undoManager?.redoMenuItemTitle ?? "Redo"
                 item.isEnabled = editor.undoManager?.canRedo ?? false
+            case "delete:":
+                item.isEnabled = editor.isEditable && editor.selectedRange().length > 0
             case "toggleRichPlainText:":
                 item.isEnabled = editor.isEditable
                 item.title = editor.isRichText ? "Make Plain Text" : "Make Rich Text"
