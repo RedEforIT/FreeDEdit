@@ -279,6 +279,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         formatMenu.addItem(listsItem)
         formatMenu.addItem(withTitle: "Wrap to Page", action: #selector(TextDocument.togglePageWrap(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Allow Hyphenation", action: #selector(TextDocument.toggleHyphenation(_:)), keyEquivalent: "")
+        let layoutOrientationItem = NSMenuItem(title: "Make Layout Vertical", action: #selector(TextDocument.toggleLayoutOrientation(_:)), keyEquivalent: "")
+        formatMenu.addItem(layoutOrientationItem)
         formatMenu.addItem(withTitle: "Prevent Editing", action: #selector(TextDocument.toggleEditingProtection(_:)), keyEquivalent: "")
         main.addItem(formatItem)
         formatItem.submenu = formatMenu
@@ -579,6 +581,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.target = document
                 item.isEnabled = editor.isRichText && editor.isEditable
                 item.state = (editor.layoutManager?.usesDefaultHyphenation ?? false) ? .on : .off
+            case "toggleLayoutOrientation:":
+                item.target = document
+                item.isEnabled = editor.isRichText && editor.isEditable
+                let isVertical = document.layoutIsVertical
+                item.title = isVertical ? "Make Layout Horizontal" : "Make Layout Vertical"
             case "toggleEditingProtection:":
                 item.isEnabled = true
                 item.state = editor.isEditable ? .off : .on
@@ -865,6 +872,7 @@ final class TextDocument: NSDocument {
     }
     private var text = NSAttributedString(string: "")
     private weak var editor: NSTextView?
+    fileprivate var layoutIsVertical = false
     private var isPlainText = (UserDefaults.standard.object(forKey: "DefaultRichText") as? Bool) == false
     private var plainTextEncoding: String.Encoding = .utf8
     private var restorationID = UUID().uuidString
@@ -1318,6 +1326,13 @@ final class TextDocument: NSDocument {
         }
         editor.undoManager?.setActionName("Allow Hyphenation")
         updateChangeCount(.changeDone)
+    }
+
+    @objc func toggleLayoutOrientation(_ sender: Any?) {
+        guard let editor, editor.isRichText, editor.isEditable else { return }
+        let orientation: NSLayoutManager.TextLayoutOrientation = layoutIsVertical ? .horizontal : .vertical
+        editor.setLayoutOrientation(orientation)
+        layoutIsVertical.toggle()
     }
 
     @objc func toggleEditingProtection(_ sender: Any?) {
