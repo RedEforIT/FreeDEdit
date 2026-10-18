@@ -165,6 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for (title, selector, key) in [("Bold", "toggleBoldface:", "b"), ("Italic", "toggleItalics:", "i"), ("Underline", "underline:", "u")] {
             formatMenu.addItem(withTitle: title, action: Selector(selector), keyEquivalent: key)
         }
+        formatMenu.addItem(withTitle: "Outline", action: #selector(NSTextView.outline(_:)), keyEquivalent: "")
         let fontsItem = NSMenuItem(title: "Show Fonts", action: Selector("orderFrontFontPanel:"), keyEquivalent: "t")
         fontsItem.target = NSFontManager.shared
         formatMenu.addItem(fontsItem)
@@ -499,6 +500,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "raiseBaseline:", "lowerBaseline:":
+                item.target = editor
+                item.isEnabled = editor.isRichText && editor.isEditable && editor.selectedRange().length > 0
+            case "outline:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable && editor.selectedRange().length > 0
             case "toggleRichPlainText:":
