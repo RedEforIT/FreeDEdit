@@ -158,59 +158,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let formatMenu = NSMenu(title: "Format")
         formatMenu.delegate = self
         formatMenu.autoenablesItems = false
-        let richPlainItem = NSMenuItem(title: "Make Plain Text", action: #selector(TextDocument.toggleRichPlainText(_:)), keyEquivalent: "t")
-        richPlainItem.keyEquivalentModifierMask = [.command, .shift]
-        formatMenu.addItem(richPlainItem)
-        formatMenu.addItem(.separator())
-        for (title, selector, key) in [("Bold", "toggleBoldface:", "b"), ("Italic", "toggleItalics:", "i"), ("Underline", "underline:", "u")] {
-            formatMenu.addItem(withTitle: title, action: Selector(selector), keyEquivalent: key)
-        }
-        formatMenu.addItem(withTitle: "Outline", action: #selector(NSTextView.outline(_:)), keyEquivalent: "")
+        let fontItem = NSMenuItem(title: "Font", action: nil, keyEquivalent: "")
+        let fontMenu = NSMenu(title: "Font")
+        fontMenu.delegate = self
         let fontsItem = NSMenuItem(title: "Show Fonts", action: Selector("orderFrontFontPanel:"), keyEquivalent: "t")
         fontsItem.target = NSFontManager.shared
-        formatMenu.addItem(fontsItem)
-        formatMenu.addItem(withTitle: "Show Colors", action: #selector(NSApplication.orderFrontColorPanel(_:)), keyEquivalent: "")
-        formatMenu.addItem(withTitle: "Copy Style", action: #selector(NSText.copyFont(_:)), keyEquivalent: "")
-        formatMenu.addItem(withTitle: "Paste Style", action: #selector(NSText.pasteFont(_:)), keyEquivalent: "")
-        let baselineItem = NSMenuItem(title: "Baseline", action: nil, keyEquivalent: "")
-        let baselineMenu = NSMenu(title: "Baseline")
-        baselineMenu.delegate = self
-        baselineMenu.addItem(withTitle: "Raise Baseline", action: #selector(NSTextView.raiseBaseline(_:)), keyEquivalent: "")
-        baselineMenu.addItem(withTitle: "Lower Baseline", action: #selector(NSTextView.lowerBaseline(_:)), keyEquivalent: "")
-        baselineItem.submenu = baselineMenu
-        formatMenu.addItem(baselineItem)
-        let directionItem = NSMenuItem(title: "Writing Direction", action: nil, keyEquivalent: "")
-        let directionMenu = NSMenu(title: "Writing Direction")
-        directionMenu.delegate = self
-        directionMenu.addItem(withTitle: "Natural", action: #selector(NSResponder.makeBaseWritingDirectionNatural(_:)), keyEquivalent: "")
-        directionMenu.addItem(withTitle: "Left to Right", action: #selector(NSResponder.makeBaseWritingDirectionLeftToRight(_:)), keyEquivalent: "")
-        directionMenu.addItem(withTitle: "Right to Left", action: #selector(NSResponder.makeBaseWritingDirectionRightToLeft(_:)), keyEquivalent: "")
-        directionItem.submenu = directionMenu
-        formatMenu.addItem(directionItem)
-        let kerningItem = NSMenuItem(title: "Kerning", action: nil, keyEquivalent: "")
-        let kerningMenu = NSMenu(title: "Kerning")
-        kerningMenu.delegate = self
-        kerningMenu.addItem(withTitle: "Use Standard", action: #selector(NSTextView.useStandardKerning(_:)), keyEquivalent: "")
-        kerningMenu.addItem(withTitle: "Tighten", action: #selector(NSTextView.tightenKerning(_:)), keyEquivalent: "")
-        kerningMenu.addItem(withTitle: "Loosen", action: #selector(NSTextView.loosenKerning(_:)), keyEquivalent: "")
-        kerningMenu.addItem(withTitle: "Use None", action: #selector(NSTextView.turnOffKerning(_:)), keyEquivalent: "")
-        kerningItem.submenu = kerningMenu
-        formatMenu.addItem(kerningItem)
-        let ligaturesItem = NSMenuItem(title: "Ligatures", action: nil, keyEquivalent: "")
-        let ligaturesMenu = NSMenu(title: "Ligatures")
-        ligaturesMenu.delegate = self
-        ligaturesMenu.addItem(withTitle: "Use Standard", action: #selector(NSTextView.useStandardLigatures(_:)), keyEquivalent: "")
-        ligaturesMenu.addItem(withTitle: "Use All", action: #selector(NSTextView.useAllLigatures(_:)), keyEquivalent: "")
-        ligaturesMenu.addItem(withTitle: "Use None", action: #selector(NSTextView.turnOffLigatures(_:)), keyEquivalent: "")
-        ligaturesItem.submenu = ligaturesMenu
-        formatMenu.addItem(ligaturesItem)
-        let scriptItem = NSMenuItem(title: "Script", action: nil, keyEquivalent: "")
-        let scriptMenu = NSMenu(title: "Script")
-        scriptMenu.delegate = self
-        scriptMenu.addItem(withTitle: "Subscript", action: #selector(NSText.subscript(_:)), keyEquivalent: "")
-        scriptMenu.addItem(withTitle: "Superscript", action: #selector(NSText.superscript(_:)), keyEquivalent: "")
-        scriptItem.submenu = scriptMenu
-        formatMenu.addItem(scriptItem)
+        fontMenu.addItem(fontsItem)
+        for (title, selector, key) in [("Bold", "toggleBoldface:", "b"), ("Italic", "toggleItalics:", "i"), ("Underline", "underline:", "u")] {
+            fontMenu.addItem(withTitle: title, action: Selector(selector), keyEquivalent: key)
+        }
+        fontMenu.addItem(withTitle: "Outline", action: #selector(NSTextView.outline(_:)), keyEquivalent: "")
+        fontMenu.addItem(.separator())
         if #available(macOS 15.0, *) {
             let highlightItem = NSMenuItem(title: "Highlight", action: nil, keyEquivalent: "")
             let highlightMenu = NSMenu(title: "Highlight")
@@ -225,17 +183,89 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 highlightMenu.addItem(item)
             }
             highlightItem.submenu = highlightMenu
-            formatMenu.addItem(highlightItem)
+            fontMenu.addItem(highlightItem)
         }
+        fontMenu.addItem(withTitle: "Styles…", action: Selector("orderFrontStylesPanel:"), keyEquivalent: "")
+        for (title, tag) in [("Bigger", 3), ("Smaller", 4)] {
+            let item = NSMenuItem(title: title, action: #selector(NSFontManager.modifyFont(_:)), keyEquivalent: "")
+            item.target = NSFontManager.shared
+            item.tag = tag
+            fontMenu.addItem(item)
+        }
+        let kerningItem = NSMenuItem(title: "Kern", action: nil, keyEquivalent: "")
+        let kerningMenu = NSMenu(title: "Kern")
+        kerningMenu.delegate = self
+        kerningMenu.addItem(withTitle: "Use Default", action: #selector(NSTextView.useStandardKerning(_:)), keyEquivalent: "")
+        kerningMenu.addItem(withTitle: "Use None", action: #selector(NSTextView.turnOffKerning(_:)), keyEquivalent: "")
+        kerningMenu.addItem(withTitle: "Tighten", action: #selector(NSTextView.tightenKerning(_:)), keyEquivalent: "")
+        kerningMenu.addItem(withTitle: "Loosen", action: #selector(NSTextView.loosenKerning(_:)), keyEquivalent: "")
+        kerningItem.submenu = kerningMenu
+        fontMenu.addItem(kerningItem)
+        let ligaturesItem = NSMenuItem(title: "Ligatures", action: nil, keyEquivalent: "")
+        let ligaturesMenu = NSMenu(title: "Ligatures")
+        ligaturesMenu.delegate = self
+        ligaturesMenu.addItem(withTitle: "Use Default", action: #selector(NSTextView.useStandardLigatures(_:)), keyEquivalent: "")
+        ligaturesMenu.addItem(withTitle: "Use None", action: #selector(NSTextView.turnOffLigatures(_:)), keyEquivalent: "")
+        ligaturesMenu.addItem(withTitle: "Use All", action: #selector(NSTextView.useAllLigatures(_:)), keyEquivalent: "")
+        ligaturesItem.submenu = ligaturesMenu
+        fontMenu.addItem(ligaturesItem)
+        let baselineItem = NSMenuItem(title: "Baseline", action: nil, keyEquivalent: "")
+        let baselineMenu = NSMenu(title: "Baseline")
+        baselineMenu.delegate = self
+        baselineMenu.addItem(withTitle: "Use Default", action: #selector(NSText.unscript(_:)), keyEquivalent: "")
+        baselineMenu.addItem(withTitle: "Superscript", action: #selector(NSText.superscript(_:)), keyEquivalent: "")
+        baselineMenu.addItem(withTitle: "Subscript", action: #selector(NSText.subscript(_:)), keyEquivalent: "")
+        baselineMenu.addItem(.separator())
+        baselineMenu.addItem(withTitle: "Raise", action: #selector(NSTextView.raiseBaseline(_:)), keyEquivalent: "")
+        baselineMenu.addItem(withTitle: "Lower", action: #selector(NSTextView.lowerBaseline(_:)), keyEquivalent: "")
+        baselineItem.submenu = baselineMenu
+        fontMenu.addItem(baselineItem)
+        fontMenu.addItem(.separator())
+        fontMenu.addItem(withTitle: "Show Colors", action: #selector(NSApplication.orderFrontColorPanel(_:)), keyEquivalent: "")
+        fontMenu.addItem(withTitle: "Copy Style", action: #selector(NSText.copyFont(_:)), keyEquivalent: "")
+        fontMenu.addItem(withTitle: "Paste Style", action: #selector(NSText.pasteFont(_:)), keyEquivalent: "")
+        fontItem.submenu = fontMenu
+        formatMenu.addItem(fontItem)
+
+        let textItem = NSMenuItem(title: "Text", action: nil, keyEquivalent: "")
+        let textMenu = NSMenu(title: "Text")
+        textMenu.delegate = self
+        for (title, selector) in [("Align Left", "alignLeft:"), ("Center", "alignCenter:"),
+                                  ("Justify", "alignJustified:"), ("Align Right", "alignRight:")] {
+            textMenu.addItem(withTitle: title, action: Selector(selector), keyEquivalent: "")
+        }
+        let directionItem = NSMenuItem(title: "Writing Direction", action: nil, keyEquivalent: "")
+        let directionMenu = NSMenu(title: "Writing Direction")
+        directionMenu.delegate = self
+        let paragraphDirection = NSMenu(title: "Paragraph")
+        paragraphDirection.delegate = self
+        paragraphDirection.addItem(withTitle: "Default", action: #selector(NSResponder.makeBaseWritingDirectionNatural(_:)), keyEquivalent: "")
+        paragraphDirection.addItem(withTitle: "Left to Right", action: #selector(NSResponder.makeBaseWritingDirectionLeftToRight(_:)), keyEquivalent: "")
+        paragraphDirection.addItem(withTitle: "Right to Left", action: #selector(NSResponder.makeBaseWritingDirectionRightToLeft(_:)), keyEquivalent: "")
+        let paragraphDirectionItem = NSMenuItem(title: "Paragraph", action: nil, keyEquivalent: "")
+        paragraphDirectionItem.submenu = paragraphDirection
+        directionMenu.addItem(paragraphDirectionItem)
+        let selectionDirection = NSMenu(title: "Selection")
+        selectionDirection.delegate = self
+        selectionDirection.addItem(withTitle: "Default", action: #selector(NSResponder.makeTextWritingDirectionNatural(_:)), keyEquivalent: "")
+        selectionDirection.addItem(withTitle: "Left to Right", action: #selector(NSResponder.makeTextWritingDirectionLeftToRight(_:)), keyEquivalent: "")
+        selectionDirection.addItem(withTitle: "Right to Left", action: #selector(NSResponder.makeTextWritingDirectionRightToLeft(_:)), keyEquivalent: "")
+        let selectionDirectionItem = NSMenuItem(title: "Selection", action: nil, keyEquivalent: "")
+        selectionDirectionItem.submenu = selectionDirection
+        directionMenu.addItem(selectionDirectionItem)
+        directionItem.submenu = directionMenu
+        textMenu.addItem(directionItem)
+        textMenu.addItem(.separator())
+        textMenu.addItem(withTitle: "Show Ruler", action: #selector(TextDocument.toggleRuler(_:)), keyEquivalent: "r")
+        textMenu.addItem(withTitle: "Copy Ruler", action: #selector(NSText.copyRuler(_:)), keyEquivalent: "")
+        textMenu.addItem(withTitle: "Paste Ruler", action: #selector(NSText.pasteRuler(_:)), keyEquivalent: "")
+        textItem.submenu = textMenu
+        formatMenu.addItem(textItem)
+
+        let richPlainItem = NSMenuItem(title: "Make Plain Text", action: #selector(TextDocument.toggleRichPlainText(_:)), keyEquivalent: "t")
+        richPlainItem.keyEquivalentModifierMask = [.command, .shift]
+        formatMenu.addItem(richPlainItem)
         formatMenu.addItem(.separator())
-        let alignment = NSMenuItem(title: "Text Alignment", action: nil, keyEquivalent: "")
-        let alignmentMenu = NSMenu(title: "Text Alignment")
-        alignmentMenu.delegate = self
-        for (title, selector) in [("Align Left", "alignLeft:"), ("Center", "alignCenter:"), ("Align Right", "alignRight:"), ("Justify", "alignJustified:")] {
-            alignmentMenu.addItem(withTitle: title, action: Selector(selector), keyEquivalent: "")
-        }
-        alignment.submenu = alignmentMenu
-        formatMenu.addItem(alignment)
         let listsItem = NSMenuItem(title: "Lists", action: nil, keyEquivalent: "")
         let listsMenu = NSMenu(title: "Lists")
         listsMenu.delegate = self
@@ -246,25 +276,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         listsItem.submenu = listsMenu
         formatMenu.addItem(listsItem)
-        formatMenu.addItem(withTitle: "Show Paragraph Styles", action: Selector("orderFrontStylesPanel:"), keyEquivalent: "")
-        formatMenu.addItem(.separator())
-        let rulerItem = NSMenuItem(title: "Show Ruler", action: #selector(TextDocument.toggleRuler(_:)), keyEquivalent: "r")
-        formatMenu.addItem(rulerItem)
-        formatMenu.addItem(withTitle: "Copy Ruler", action: #selector(NSText.copyRuler(_:)), keyEquivalent: "")
-        formatMenu.addItem(withTitle: "Paste Ruler", action: #selector(NSText.pasteRuler(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Wrap to Page", action: #selector(TextDocument.togglePageWrap(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Prevent Editing", action: #selector(TextDocument.toggleEditingProtection(_:)), keyEquivalent: "")
-        let sizeMenu = NSMenu(title: "Size")
-        sizeMenu.delegate = self
-        for (title, tag) in [("Larger", 3), ("Smaller", 4)] {
-            let item = NSMenuItem(title: title, action: #selector(NSFontManager.modifyFont(_:)), keyEquivalent: "")
-            item.target = NSFontManager.shared
-            item.tag = tag
-            sizeMenu.addItem(item)
-        }
-        let sizeItem = NSMenuItem(title: "Size", action: nil, keyEquivalent: "")
-        sizeItem.submenu = sizeMenu
-        formatMenu.addItem(sizeItem)
         main.addItem(formatItem)
         formatItem.submenu = formatMenu
 
@@ -537,7 +550,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "outline:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable && editor.selectedRange().length > 0
-            case "makeBaseWritingDirectionNatural:", "makeBaseWritingDirectionLeftToRight:", "makeBaseWritingDirectionRightToLeft:":
+            case "makeBaseWritingDirectionNatural:", "makeBaseWritingDirectionLeftToRight:", "makeBaseWritingDirectionRightToLeft:",
+                 "makeTextWritingDirectionNatural:", "makeTextWritingDirectionLeftToRight:", "makeTextWritingDirectionRightToLeft:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "useStandardKerning:", "tightenKerning:", "loosenKerning:", "turnOffKerning:":
