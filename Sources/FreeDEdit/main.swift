@@ -171,6 +171,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         formatMenu.addItem(withTitle: "Show Colors", action: #selector(NSApplication.orderFrontColorPanel(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Copy Style", action: #selector(NSText.copyFont(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Paste Style", action: #selector(NSText.pasteFont(_:)), keyEquivalent: "")
+        let baselineItem = NSMenuItem(title: "Baseline", action: nil, keyEquivalent: "")
+        let baselineMenu = NSMenu(title: "Baseline")
+        baselineMenu.delegate = self
+        baselineMenu.addItem(withTitle: "Raise Baseline", action: #selector(NSTextView.raiseBaseline(_:)), keyEquivalent: "")
+        baselineMenu.addItem(withTitle: "Lower Baseline", action: #selector(NSTextView.lowerBaseline(_:)), keyEquivalent: "")
+        baselineItem.submenu = baselineMenu
+        formatMenu.addItem(baselineItem)
         if #available(macOS 15.0, *) {
             let highlightItem = NSMenuItem(title: "Highlight", action: nil, keyEquivalent: "")
             let highlightMenu = NSMenu(title: "Highlight")
@@ -491,6 +498,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "pasteRuler:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
+            case "raiseBaseline:", "lowerBaseline:":
+                item.target = editor
+                item.isEnabled = editor.isRichText && editor.isEditable && editor.selectedRange().length > 0
             case "toggleRichPlainText:":
                 item.isEnabled = editor.isEditable
                 item.title = editor.isRichText ? "Make Plain Text" : "Make Rich Text"
