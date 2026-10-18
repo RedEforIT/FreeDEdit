@@ -910,6 +910,9 @@ final class TextDocument: NSDocument {
     }
     private var text = NSAttributedString(string: "")
     private weak var editor: NSTextView?
+    private weak var markdownPreviewScrollView: NSScrollView?
+    private weak var markdownPreviewTextView: NSTextView?
+    private var isShowingMarkdownPreview = false
     fileprivate var layoutIsVertical = false
     private var isPlainText = (UserDefaults.standard.object(forKey: "DefaultRichText") as? Bool) == false
     private var plainTextEncoding: String.Encoding = .utf8
@@ -929,7 +932,7 @@ final class TextDocument: NSDocument {
     }
     static var pendingOpenOptions: OpenOptions?
     static let openableTypes: [UTType] = [
-        .plainText, .rtf, .html,
+        .plainText, UTType("net.daringfireball.markdown")!, .rtf, .html,
         UTType("com.apple.rtfd")!, UTType("com.apple.webarchive")!,
         UTType("org.oasis-open.opendocument.text")!,
         UTType("org.openxmlformats.wordprocessingml.document")!,
@@ -939,7 +942,7 @@ final class TextDocument: NSDocument {
     override class var autosavesInPlace: Bool { true }
     override class var preservesVersions: Bool { true }
     override class var readableTypes: [String] {
-        [UTType.plainText.identifier, UTType.rtf.identifier, "com.apple.rtfd", UTType.html.identifier,
+        [UTType.plainText.identifier, "net.daringfireball.markdown", UTType.rtf.identifier, "com.apple.rtfd", UTType.html.identifier,
          "com.apple.webarchive", "org.oasis-open.opendocument.text",
          "org.openxmlformats.wordprocessingml.document", "com.microsoft.word.wordml", "com.microsoft.word.doc"]
     }
@@ -1008,12 +1011,37 @@ final class TextDocument: NSDocument {
         scroll.documentView = view
         window.contentView?.addSubview(scroll)
         editor = view
+
+        let previewScroll = NSScrollView(frame: scroll.frame)
+        previewScroll.autoresizingMask = [.width, .height]
+        previewScroll.hasVerticalScroller = true
+        previewScroll.borderType = .noBorder
+        let preview = NSTextView(frame: previewScroll.contentView.bounds)
+        preview.minSize = .zero
+        preview.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        preview.isVerticallyResizable = true
+        preview.isHorizontallyResizable = false
+        preview.autoresizingMask = [.width]
+        preview.isRichText = true
+        preview.isEditable = false
+        preview.isSelectable = true
+        preview.drawsBackground = false
+        preview.textContainerInset = NSSize(width: 18, height: 18)
+        preview.font = NSFont.systemFont(ofSize: 12)
+        previewScroll.documentView = preview
+        previewScroll.isHidden = true
+        window.contentView?.addSubview(previewScroll)
+        markdownPreviewScrollView = previewScroll
+        markdownPreviewTextView = preview
+
         let toolbar = NSToolbar(identifier: "FreeDEditFormatting")
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
         toolbar.sizeMode = .small
-        toolbar.isVisible = !isPlainText
+        toolbar.isVisible = true
         window.toolbar = toolbar
+        updateMarkdownPreviewButton()
+        updateFormattingToolbarState()
         scroll.rulersVisible = view.usesRuler
         let controller = NSWindowController(window: window)
         addWindowController(controller)
@@ -1258,6 +1286,139 @@ final class TextDocument: NSDocument {
         changeTextMode(toRichText: !editor.isRichText)
     }
 
+    @objc private func toggleMarkdownPreview(_ sender: Any?) {
+        setMarkdownPreview(!isShowingMarkdownPreview)
+    }
+
+    private func setMarkdownPreview(_ showingPreview: Bool) {
+        guard let editor, let previewScroll = markdownPreviewScrollView,
+              let preview = markdownPreviewTextView else { return }
+        if showingPreview {
+            preview.textStorage?.setAttributedString(renderedMarkdown(editor.string))
+        }
+        isShowingMarkdownPreview = showingPreview
+        editor.enclosingScrollView?.isHidden = showingPreview
+        previewScroll.isHidden = !showingPreview
+        if showingPreview {
+            editor.window?.makeFirstResponder(preview)
+        } else {
+            editor.window?.makeFirstResponder(editor)
+        }
+        updateFormattingToolbarState()
+    }
+
+    private func renderedMarkdown(_ source: String) -> NSAttributedString {
+        let output = NSMutableAttributedString(string: "")
+        let lines = source.components(separatedBy: .newlines)
+        var insideCodeBlock = false
+
+        for (index, line) in lines.enumerated() {
+            let start = output.length
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") {
+                insideCodeBlock.toggle()
+            } else if insideCodeBlock {
+                output.append(NSAttributedString(string: line, attributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+                    .foregroundColor: NSColor.labelColor,
+                    .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.16)
+                ]))
+            } else {
+                var content = line
+                var headingLevel = 0
+                while headingLevel < 6, content.hasPrefix("#") {
+                    headingLevel += 1
+                    content.removeFirst()
+                }
+                if headingLevel > 0, content.hasPrefix(" ") {
+                    content.removeFirst()
+                } else {
+                    headingLevel = 0
+                    content = line
+                }
+
+                var listPrefix = ""
+                if headingLevel == 0 {
+                    if content.hasPrefix("- ") || content.hasPrefix("* ") || content.hasPrefix("+ ") {
+                        content.removeFirst(2)
+                        listPrefix = "•  "
+                    } else if let match = content.range(of: #"^\d+[.)]\s+"#, options: .regularExpression) {
+                        listPrefix = String(content[match])
+                        content.removeSubrange(match)
+                    } else if content.hasPrefix("> ") {
+                        content.removeFirst(2)
+                        listPrefix = "│  "
+                    }
+                }
+
+                if !listPrefix.isEmpty {
+                    output.append(NSAttributedString(string: listPrefix, attributes: [
+                        .font: NSFont.systemFont(ofSize: 12),
+                        .foregroundColor: NSColor.secondaryLabelColor
+                    ]))
+                }
+                do {
+                    output.append(try NSAttributedString(
+                        markdown: content,
+                        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace),
+                        baseURL: nil
+                    ))
+                } catch {
+                    output.append(NSAttributedString(string: content))
+                }
+
+                if headingLevel > 0 {
+                    let size: CGFloat = switch headingLevel {
+                    case 1: 28
+                    case 2: 23
+                    case 3: 19
+                    case 4: 16
+                    default: 14
+                    }
+                    output.addAttribute(.font, value: NSFont.systemFont(ofSize: size, weight: .bold),
+                                        range: NSRange(location: start, length: output.length - start))
+                }
+            }
+
+            if index < lines.count - 1 { output.append(NSAttributedString(string: "\n")) }
+            let paragraphRange = NSRange(location: start, length: output.length - start)
+            if paragraphRange.length > 0 {
+                let style = NSMutableParagraphStyle()
+                style.lineSpacing = 2
+                if !insideCodeBlock && trimmed.hasPrefix("#") {
+                    style.paragraphSpacingBefore = 8
+                    style.paragraphSpacing = 5
+                } else {
+                    style.paragraphSpacing = 4
+                }
+                if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("+ ") ||
+                    line.range(of: #"^\d+[.)]\s+"#, options: .regularExpression) != nil {
+                    style.headIndent = 20
+                    style.firstLineHeadIndent = 0
+                } else if line.hasPrefix("> ") {
+                    style.headIndent = 14
+                    style.firstLineHeadIndent = 0
+                }
+                output.addAttribute(.paragraphStyle, value: style, range: paragraphRange)
+            }
+        }
+        return output
+    }
+
+    private func updateMarkdownPreviewButton() {
+        guard let item = editor?.window?.toolbar?.items.first(where: { $0.itemIdentifier.rawValue == "markdownPreview" }),
+              let button = item.view as? NSButton else { return }
+        let title = isShowingMarkdownPreview ? "Edit Markdown Source" : "Show Markdown Preview"
+        button.state = isShowingMarkdownPreview ? .on : .off
+        button.image = NSImage(systemSymbolName: isShowingMarkdownPreview ? "chevron.left.forwardslash.chevron.right" : "text.page",
+                               accessibilityDescription: title)
+        button.toolTip = title
+        button.setAccessibilityLabel(title)
+        button.setAccessibilityHelp(isShowingMarkdownPreview
+                                    ? "Return to the raw Markdown text."
+                                    : "Render Markdown without changing its source text.")
+    }
+
     private func textModeSnapshot(from editor: NSTextView) -> TextModeSnapshot {
         let showsRuler = editor.isRichText
             ? editor.usesRuler
@@ -1301,6 +1462,7 @@ final class TextDocument: NSDocument {
     }
 
     private func applyTextMode(_ snapshot: TextModeSnapshot, to editor: NSTextView) {
+        if isShowingMarkdownPreview { setMarkdownPreview(false) }
         editor.isRichText = snapshot.isRichText
         if snapshot.isRichText {
             editor.textStorage?.setAttributedString(snapshot.contents)
@@ -1310,13 +1472,15 @@ final class TextDocument: NSDocument {
             editor.string = snapshot.contents.string
         }
         editor.enclosingScrollView?.rulersVisible = editor.usesRuler
-        editor.window?.toolbar?.isVisible = snapshot.isRichText
+        editor.window?.toolbar?.isVisible = true
         let textLength = (editor.string as NSString).length
         let location = min(snapshot.selection.location, textLength)
         let length = min(snapshot.selection.length, textLength - location)
         editor.setSelectedRange(NSRange(location: location, length: length))
         text = editor.attributedString()
         isPlainText = !snapshot.isRichText
+        updateToolbarItemsForTextMode()
+        updateFormattingToolbarState()
     }
 
     @objc func applyHighlight(_ sender: NSMenuItem) {
@@ -1867,10 +2031,26 @@ extension TextDocument: NSTextViewDelegate {
 }
 
 extension TextDocument: NSToolbarDelegate {
-    private var toolbarIDs: [NSToolbarItem.Identifier] {
+    private var formattingToolbarIDs: [NSToolbarItem.Identifier] {
         [.init("paragraphStyle"), .init("bold"), .init("italic"), .init("underline"), .init("strike"),
          .init("textColor"), .init("underlineColor"), .init("highlightColor"),
          .init("fontFamily"), .init("fontStyle"), .init("fontSize"), .init("alignment"), .init("listStyle"), .init("lineSpacing")]
+    }
+
+    private var toolbarIDs: [NSToolbarItem.Identifier] {
+        let markdown = NSToolbarItem.Identifier("markdownPreview")
+        return editor?.isRichText == true ? [markdown] + formattingToolbarIDs : [markdown]
+    }
+
+    private func updateToolbarItemsForTextMode() {
+        guard let toolbar = editor?.window?.toolbar else { return }
+        let allowed = Set(toolbarIDs)
+        for index in toolbar.items.indices.reversed() where !allowed.contains(toolbar.items[index].itemIdentifier) {
+            toolbar.removeItem(at: index)
+        }
+        for (index, identifier) in toolbarIDs.enumerated() where !toolbar.items.contains(where: { $0.itemIdentifier == identifier }) {
+            toolbar.insertItem(withItemIdentifier: identifier, at: index)
+        }
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -1904,6 +2084,15 @@ extension TextDocument: NSToolbarDelegate {
         }
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
         switch itemIdentifier.rawValue {
+        case "markdownPreview":
+            item.label = "Markdown Preview"
+            let button = NSButton(title: "", target: self, action: #selector(toggleMarkdownPreview(_:)))
+            button.setButtonType(.toggle)
+            button.bezelStyle = .texturedRounded
+            button.imagePosition = .imageOnly
+            button.frame = NSRect(x: 0, y: 0, width: 28, height: 24)
+            item.view = button
+            updateMarkdownPreviewButton()
         case "bold":
             item.label = "Bold"
             item.view = formattingButton("B", symbol: "bold", tag: 1, label: "Bold")
@@ -2225,7 +2414,11 @@ extension TextDocument: NSToolbarDelegate {
 
     private func updateFormattingToolbarState() {
         guard let editor, let toolbar = editor.window?.toolbar else { return }
-        for item in toolbar.items { item.isEnabled = editor.isRichText && editor.isEditable }
+        for item in toolbar.items {
+            item.isEnabled = item.itemIdentifier.rawValue == "markdownPreview"
+                ? editor.isEditable
+                : editor.isRichText && editor.isEditable && !isShowingMarkdownPreview
+        }
         let storage = editor.textStorage
         let length = storage?.length ?? 0
         let location = length == 0 ? 0 : min(editor.selectedRange().location, length - 1)
@@ -2287,6 +2480,7 @@ extension TextDocument: NSToolbarDelegate {
             }
         }
         updateToolbarColorControlViews()
+        updateMarkdownPreviewButton()
     }
 
     private func updateToolbarColorControlViews() {

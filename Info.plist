@@ -29,7 +29,7 @@
             <key>CFBundleTypeName</key><string>Plain Text</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
             <key>NSDocumentClass</key><string>TextDocument</string>
-            <key>LSItemContentTypes</key><array><string>public.plain-text</string></array>
+            <key>LSItemContentTypes</key><array><string>public.plain-text</string><string>net.daringfireball.markdown</string></array>
         </dict>
         <dict>
             <key>CFBundleTypeName</key><string>HTML</string>
@@ -62,6 +62,15 @@
     </array>
     <key>UTImportedTypeDeclarations</key>
     <array>
+        <dict>
+            <key>UTTypeIdentifier</key><string>net.daringfireball.markdown</string>
+            <key>UTTypeDescription</key><string>Markdown Document</string>
+            <key>UTTypeConformsTo</key><array><string>public.plain-text</string><string>public.text</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key><array><string>md</string><string>markdown</string></array>
+            </dict>
+        </dict>
         <dict>
             <key>UTTypeIdentifier</key><string>com.microsoft.word.wordml</string>
             <key>UTTypeDescription</key><string>Microsoft Word 2003 XML Document</string>
