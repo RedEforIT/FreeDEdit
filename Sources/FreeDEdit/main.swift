@@ -922,6 +922,7 @@ final class TextDocument: NSDocument {
     private var toolbarTextColor: NSColor = .labelColor
     private var toolbarUnderlineColor: NSColor = .systemBlue
     private var toolbarHighlightColor: NSColor = .controlAccentColor
+    private var mixedToolbarColors = Set<Int>()
     private var toolbarColorPanelTarget: ToolbarColorAttribute = .text
     var findReplaceEditor: NSTextView? { editor }
     var menuEditor: NSTextView? { editor }
@@ -2129,7 +2130,7 @@ extension TextDocument: NSToolbarDelegate {
         updateToolbarColorControlViews()
     }
 
-    private func applyToolbarColor(_ attribute: ToolbarColorAttribute) {
+    private func applyToolbarColor(_ attribute: ToolbarColorAttribute, resetting: Bool = false) {
         guard let editor, editor.isRichText, editor.isEditable else { return }
         let range = editor.selectedRange()
         registerFormattingUndo(in: editor, range: range)
@@ -2143,9 +2144,33 @@ extension TextDocument: NSToolbarDelegate {
         case .highlight:
             formatting = [.backgroundColor: color.withAlphaComponent(0.35)]
         }
-        if range.length > 0 { editor.textStorage?.addAttributes(formatting, range: range) }
+        if range.length > 0 {
+            if resetting {
+                switch attribute {
+                case .text: editor.textStorage?.removeAttribute(.foregroundColor, range: range)
+                case .underline:
+                    editor.textStorage?.removeAttribute(.underlineColor, range: range)
+                    editor.textStorage?.addAttribute(.underlineStyle,
+                                                     value: NSUnderlineStyle.single.rawValue,
+                                                     range: range)
+                case .highlight: editor.textStorage?.removeAttribute(.backgroundColor, range: range)
+                }
+            } else {
+                editor.textStorage?.addAttributes(formatting, range: range)
+            }
+        }
         var attributes = editor.typingAttributes
-        formatting.forEach { attributes[$0.key] = $0.value }
+        if resetting {
+            switch attribute {
+            case .text: attributes.removeValue(forKey: .foregroundColor)
+            case .underline:
+                attributes.removeValue(forKey: .underlineColor)
+                attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            case .highlight: attributes.removeValue(forKey: .backgroundColor)
+            }
+        } else {
+            formatting.forEach { attributes[$0.key] = $0.value }
+        }
         editor.typingAttributes = attributes
         editor.didChangeText()
         updateFormattingToolbarState()
@@ -2196,6 +2221,12 @@ extension TextDocument: NSToolbarDelegate {
     @objc private func showToolbarColorMenu(_ sender: NSButton) {
         guard let attribute = ToolbarColorAttribute(rawValue: sender.tag) else { return }
         let menu = NSMenu(title: "\(attribute.title) Color")
+        let reset = NSMenuItem(title: "Default Color", action: #selector(selectToolbarColor(_:)), keyEquivalent: "")
+        reset.target = self
+        reset.tag = attribute.rawValue
+        reset.representedObject = NSNull()
+        menu.addItem(reset)
+        menu.addItem(.separator())
         for (name, color) in toolbarColorChoices(for: attribute) {
             let item = NSMenuItem(title: name, action: #selector(selectToolbarColor(_:)), keyEquivalent: "")
             item.target = self
@@ -2223,8 +2254,20 @@ extension TextDocument: NSToolbarDelegate {
 
     @objc private func selectToolbarColor(_ sender: NSMenuItem) {
         guard let attribute = ToolbarColorAttribute(rawValue: sender.tag),
-              let color = sender.representedObject as? NSColor else { return }
+              sender.representedObject != nil else { return }
+        if sender.representedObject is NSNull {
+            switch attribute {
+            case .text: setToolbarColor(.labelColor, for: attribute)
+            case .underline: setToolbarColor(.systemBlue, for: attribute)
+            case .highlight: setToolbarColor(.controlAccentColor, for: attribute)
+            }
+            mixedToolbarColors.remove(attribute.rawValue)
+            applyToolbarColor(attribute, resetting: true)
+            return
+        }
+        guard let color = sender.representedObject as? NSColor else { return }
         setToolbarColor(color, for: attribute)
+        mixedToolbarColors.remove(attribute.rawValue)
         applyToolbarColor(attribute)
     }
 
@@ -2235,7 +2278,7 @@ extension TextDocument: NSToolbarDelegate {
         panel.color = toolbarColor(for: attribute)
         panel.setTarget(self)
         panel.setAction(#selector(toolbarColorPanelDidChange(_:)))
-        panel.isContinuous = true
+        panel.isContinuous = false
         panel.orderFront(nil)
     }
 
@@ -2390,9 +2433,9 @@ extension TextDocument: NSToolbarDelegate {
         let strikeState = selectedAttributeState(.strikethroughStyle) { value in
             (value as? Int ?? 0) != 0
         }
-        if let color = attributes[.foregroundColor] as? NSColor { toolbarTextColor = color }
-        if let color = attributes[.underlineColor] as? NSColor { toolbarUnderlineColor = color }
-        if let color = attributes[.backgroundColor] as? NSColor { toolbarHighlightColor = color.withAlphaComponent(1) }
+        updateToolbarColorState(.text, key: .foregroundColor, defaultColor: .labelColor)
+        updateToolbarColorState(.underline, key: .underlineColor, defaultColor: .systemBlue)
+        updateToolbarColorState(.highlight, key: .backgroundColor, defaultColor: .controlAccentColor)
         for item in toolbar.items {
             switch item.itemIdentifier.rawValue {
             case "bold":
@@ -2475,12 +2518,62 @@ extension TextDocument: NSToolbarDelegate {
             ("highlightColor", ToolbarColorAttribute.highlight)
         ] {
             guard let view = toolbar.items.first(where: { $0.itemIdentifier.rawValue == identifier })?.view else { continue }
-            let color = toolbarColor(for: attribute)
-            view.viewWithTag(100 + attribute.rawValue).flatMap { $0 as? NSImageView }?.contentTintColor = color
+            let isMixed = mixedToolbarColors.contains(attribute.rawValue)
+            let color = isMixed ? NSColor.secondaryLabelColor : toolbarColor(for: attribute)
+            if let icon = view.viewWithTag(100 + attribute.rawValue) as? NSImageView {
+                icon.contentTintColor = color
+                icon.setAccessibilityHelp(isMixed ? "Selected text uses multiple colors." : nil)
+            }
             if let swatch = toolbarColorSwatch(in: view, attribute: attribute) {
                 swatch.wantsLayer = true
                 swatch.layer?.backgroundColor = color.cgColor
+                swatch.layer?.borderWidth = isMixed ? 1 : 0
+                swatch.layer?.borderColor = NSColor.tertiaryLabelColor.cgColor
             }
+        }
+    }
+
+    private func updateToolbarColorState(_ attribute: ToolbarColorAttribute,
+                                         key: NSAttributedString.Key,
+                                         defaultColor: NSColor) {
+        guard let editor, let storage = editor.textStorage else { return }
+        let selection = editor.selectedRange()
+        guard selection.length > 0 else {
+            mixedToolbarColors.remove(attribute.rawValue)
+            setToolbarColor(editor.typingAttributes[key] as? NSColor ?? defaultColor, for: attribute)
+            return
+        }
+        let location = min(selection.location, storage.length)
+        let length = min(selection.length, storage.length - location)
+        guard length > 0 else { return }
+        var firstValue: NSColor?
+        var didReadFirst = false
+        var mixed = false
+        storage.enumerateAttribute(key, in: NSRange(location: location, length: length)) { value, _, _ in
+            let color = value as? NSColor
+            if !didReadFirst {
+                firstValue = color
+                didReadFirst = true
+            } else if !Self.colorsEqual(firstValue, color) {
+                mixed = true
+            }
+        }
+        if mixed {
+            mixedToolbarColors.insert(attribute.rawValue)
+        } else {
+            mixedToolbarColors.remove(attribute.rawValue)
+            let color = firstValue ?? defaultColor
+            setToolbarColor(attribute.rawValue == ToolbarColorAttribute.highlight.rawValue
+                            ? color.withAlphaComponent(1) : color,
+                            for: attribute)
+        }
+    }
+
+    private static func colorsEqual(_ lhs: NSColor?, _ rhs: NSColor?) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil): true
+        case let (left?, right?): left.isEqual(right)
+        default: false
         }
     }
 
