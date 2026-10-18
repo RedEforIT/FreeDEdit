@@ -2376,21 +2376,33 @@ extension TextDocument: NSToolbarDelegate {
         let attributes = length > 0 ? storage?.attributes(at: location, effectiveRange: nil) ?? [:] : editor.typingAttributes
         let font = attributes[.font] as? NSFont ?? editor.font ?? NSFont.systemFont(ofSize: 12)
         let traits = NSFontManager.shared.traits(of: font)
+        let boldState = selectedAttributeState(.font) { value in
+            guard let font = value as? NSFont else { return false }
+            return NSFontManager.shared.traits(of: font).contains(.boldFontMask)
+        }
+        let italicState = selectedAttributeState(.font) { value in
+            guard let font = value as? NSFont else { return false }
+            return NSFontManager.shared.traits(of: font).contains(.italicFontMask)
+        }
+        let underlineState = selectedAttributeState(.underlineStyle) { value in
+            (value as? Int ?? 0) != 0
+        }
+        let strikeState = selectedAttributeState(.strikethroughStyle) { value in
+            (value as? Int ?? 0) != 0
+        }
         if let color = attributes[.foregroundColor] as? NSColor { toolbarTextColor = color }
         if let color = attributes[.underlineColor] as? NSColor { toolbarUnderlineColor = color }
         if let color = attributes[.backgroundColor] as? NSColor { toolbarHighlightColor = color.withAlphaComponent(1) }
         for item in toolbar.items {
             switch item.itemIdentifier.rawValue {
             case "bold":
-                (item.view as? NSButton)?.state = traits.contains(.boldFontMask) ? .on : .off
+                (item.view as? NSButton)?.state = boldState
             case "italic":
-                (item.view as? NSButton)?.state = traits.contains(.italicFontMask) ? .on : .off
+                (item.view as? NSButton)?.state = italicState
             case "underline":
-                let value = attributes[.underlineStyle] as? Int ?? 0
-                (item.view as? NSButton)?.state = value == 0 ? .off : .on
+                (item.view as? NSButton)?.state = underlineState
             case "strike":
-                let value = attributes[.strikethroughStyle] as? Int ?? 0
-                (item.view as? NSButton)?.state = value == 0 ? .off : .on
+                (item.view as? NSButton)?.state = strikeState
             case "fontFamily":
                 if let popup = item.view as? NSPopUpButton {
                     popup.selectItem(withTitle: font.familyName ?? font.fontName)
@@ -2432,6 +2444,27 @@ extension TextDocument: NSToolbarDelegate {
         }
         updateToolbarColorControlViews()
         updateMarkdownPreviewButton()
+    }
+
+    private func selectedAttributeState(_ key: NSAttributedString.Key,
+                                        isActive: (Any?) -> Bool) -> NSControl.StateValue {
+        guard let editor, let storage = editor.textStorage else { return .off }
+        let selection = editor.selectedRange()
+        guard selection.length > 0 else {
+            return isActive(editor.typingAttributes[key]) ? .on : .off
+        }
+        let location = min(selection.location, storage.length)
+        let length = min(selection.length, storage.length - location)
+        guard length > 0 else { return .off }
+        var firstValue: Bool?
+        var mixed = false
+        storage.enumerateAttribute(key, in: NSRange(location: location, length: length)) { value, _, _ in
+            let active = isActive(value)
+            if let firstValue, firstValue != active { mixed = true }
+            else if firstValue == nil { firstValue = active }
+        }
+        if mixed { return .mixed }
+        return firstValue == true ? .on : .off
     }
 
     private func updateToolbarColorControlViews() {
