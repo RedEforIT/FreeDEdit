@@ -277,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         listsItem.submenu = listsMenu
         formatMenu.addItem(listsItem)
+        formatMenu.addItem(withTitle: "List…", action: #selector(NSTextView.orderFrontListPanel(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Table…", action: #selector(TextDocument.insertTable(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Wrap to Page", action: #selector(TextDocument.togglePageWrap(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Allow Hyphenation", action: #selector(TextDocument.toggleHyphenation(_:)), keyEquivalent: "")
@@ -594,6 +595,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "insertTable:":
                 item.target = document
+                item.isEnabled = editor.isRichText && editor.isEditable
+            case "orderFrontListPanel:":
+                item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "orderFrontFontPanel:", "orderFrontColorPanel:", "orderFrontStylesPanel:":
                 item.isEnabled = editor.isRichText && editor.isEditable
