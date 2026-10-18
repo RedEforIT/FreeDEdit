@@ -1308,101 +1308,52 @@ final class TextDocument: NSDocument {
     }
 
     private func renderedMarkdown(_ source: String) -> NSAttributedString {
-        let output = NSMutableAttributedString(string: "")
-        let lines = source.components(separatedBy: .newlines)
-        var insideCodeBlock = false
+        // Foundation's full Markdown parser handles block constructs (including
+        // nested lists, links, images, tables, and fenced code) as well as inline
+        // emphasis. The previous line-by-line renderer silently discarded these.
+        let parsed: NSAttributedString
+        do {
+            parsed = try NSAttributedString(markdown: source,
+                                            options: .init(interpretedSyntax: .full),
+                                            baseURL: nil)
+        } catch {
+            return NSAttributedString(string: source)
+        }
 
-        for (index, line) in lines.enumerated() {
-            let start = output.length
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("```") {
-                insideCodeBlock.toggle()
-            } else if insideCodeBlock {
-                output.append(NSAttributedString(string: line, attributes: [
-                    .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
-                    .foregroundColor: NSColor.labelColor,
-                    .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.16)
-                ]))
-            } else {
-                var content = line
-                var headingLevel = 0
-                while headingLevel < 6, content.hasPrefix("#") {
-                    headingLevel += 1
-                    content.removeFirst()
-                }
-                if headingLevel > 0, content.hasPrefix(" ") {
-                    content.removeFirst()
-                } else {
-                    headingLevel = 0
-                    content = line
-                }
-
-                var listPrefix = ""
-                if headingLevel == 0 {
-                    if content.hasPrefix("- ") || content.hasPrefix("* ") || content.hasPrefix("+ ") {
-                        content.removeFirst(2)
-                        listPrefix = "•  "
-                    } else if let match = content.range(of: #"^\d+[.)]\s+"#, options: .regularExpression) {
-                        listPrefix = String(content[match])
-                        content.removeSubrange(match)
-                    } else if content.hasPrefix("> ") {
-                        content.removeFirst(2)
-                        listPrefix = "│  "
-                    }
-                }
-
-                if !listPrefix.isEmpty {
-                    output.append(NSAttributedString(string: listPrefix, attributes: [
-                        .font: NSFont.systemFont(ofSize: 12),
-                        .foregroundColor: NSColor.secondaryLabelColor
-                    ]))
-                }
-                do {
-                    output.append(try NSAttributedString(
-                        markdown: content,
-                        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace),
-                        baseURL: nil
-                    ))
-                } catch {
-                    output.append(NSAttributedString(string: content))
-                }
-
-                if headingLevel > 0 {
-                    let size: CGFloat = switch headingLevel {
-                    case 1: 28
-                    case 2: 23
-                    case 3: 19
-                    case 4: 16
-                    default: 14
-                    }
-                    output.addAttribute(.font, value: NSFont.systemFont(ofSize: size, weight: .bold),
-                                        range: NSRange(location: start, length: output.length - start))
-                }
-            }
-
-            if index < lines.count - 1 { output.append(NSAttributedString(string: "\n")) }
-            let paragraphRange = NSRange(location: start, length: output.length - start)
-            if paragraphRange.length > 0 {
-                let style = NSMutableParagraphStyle()
-                style.lineSpacing = 2
-                if !insideCodeBlock && trimmed.hasPrefix("#") {
-                    style.paragraphSpacingBefore = 8
-                    style.paragraphSpacing = 5
-                } else {
-                    style.paragraphSpacing = 4
-                }
-                if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("+ ") ||
-                    line.range(of: #"^\d+[.)]\s+"#, options: .regularExpression) != nil {
-                    style.headIndent = 20
-                    style.firstLineHeadIndent = 0
-                } else if line.hasPrefix("> ") {
-                    style.headIndent = 14
-                    style.firstLineHeadIndent = 0
-                }
-                output.addAttribute(.paragraphStyle, value: style, range: paragraphRange)
-            }
+        let output = NSMutableAttributedString(attributedString: parsed)
+        guard output.length > 0 else { return output }
+        let presentationIntent = NSAttributedString.Key("NSPresentationIntent")
+        var codeRanges: [NSRange] = []
+        output.enumerateAttribute(presentationIntent,
+                                  in: NSRange(location: 0, length: output.length)) { value, range, _ in
+            guard let value, String(describing: value).contains("CodeBlock") else { return }
+            codeRanges.append(range)
+        }
+        for range in codeRanges {
+            output.addAttributes([
+                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+                .foregroundColor: NSColor.labelColor,
+                .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.16)
+            ], range: range)
+            Self.highlightMarkdownCode(in: output, range: range)
         }
         return output
+    }
+
+    private static func highlightMarkdownCode(in text: NSMutableAttributedString, range: NSRange) {
+        let rules: [(String, NSColor)] = [
+            (#"\b(?:true|false|nil|null|None|self|this)\b"#, .systemPurple),
+            (#"\b(?:func|function|class|struct|enum|protocol|extension|let|var|const|if|else|for|while|return|import|from|as|in|throw|try|catch|new|def|async|await|public|private|static|typealias)\b"#, .systemBlue),
+            (#"\b\d+(?:\.\d+)?\b"#, .systemOrange),
+            (#"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'"#, .systemRed),
+            (#"//[^\n]*|/\*[\s\S]*?\*/|#[^\n]*"#, .secondaryLabelColor)
+        ]
+        for (pattern, color) in rules {
+            guard let expression = try? NSRegularExpression(pattern: pattern) else { continue }
+            for match in expression.matches(in: text.string, range: range) {
+                text.addAttribute(.foregroundColor, value: color, range: match.range)
+            }
+        }
     }
 
     private func updateMarkdownPreviewButton() {
