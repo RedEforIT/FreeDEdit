@@ -1,0 +1,1096 @@
+import AppKit
+import UniformTypeIdentifiers
+
+@main
+enum FreeDEditApp {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.setActivationPolicy(.regular)
+        app.run()
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private weak var recentDocumentsMenu: NSMenu?
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        installMainMenu()
+        do {
+            try createNewDocument()
+        } catch {
+            NSApp.presentError(error)
+        }
+    }
+
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { false }
+
+    @MainActor
+    private func installMainMenu() {
+        let main = NSMenu()
+        let appMenuItem = NSMenuItem()
+        main.addItem(appMenuItem)
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About FreeDEdit", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettingsWindow(_:)), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Services", action: nil, keyEquivalent: "")
+        appMenu.items.last?.submenu = NSApplication.shared.servicesMenu
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Hide FreeDEdit", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit FreeDEdit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenuItem.submenu = appMenu
+
+        let fileItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+        let fileMenu = NSMenu(title: "File")
+        let newItem = NSMenuItem(title: "New", action: #selector(newDocument(_:)), keyEquivalent: "n")
+        newItem.target = self
+        fileMenu.addItem(newItem)
+        let openItem = NSMenuItem(title: "Open…", action: #selector(openDocument(_:)), keyEquivalent: "o")
+        openItem.target = self
+        fileMenu.addItem(openItem)
+        let recentItem = NSMenuItem(title: "Open Recent", action: nil, keyEquivalent: "")
+        let recentMenu = NSMenu(title: "Open Recent")
+        recentMenu.delegate = self
+        recentDocumentsMenu = recentMenu
+        recentItem.submenu = recentMenu
+        fileMenu.addItem(recentItem)
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        fileMenu.addItem(withTitle: "Duplicate", action: #selector(NSDocument.duplicate(_:)), keyEquivalent: "")
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(withTitle: "Save", action: #selector(NSDocument.save(_:)), keyEquivalent: "s")
+        fileMenu.addItem(withTitle: "Save As…", action: #selector(NSDocument.saveAs(_:)), keyEquivalent: "S")
+        fileMenu.addItem(withTitle: "Rename…", action: #selector(NSDocument.rename(_:)), keyEquivalent: "")
+        fileMenu.addItem(withTitle: "Move To…", action: #selector(NSDocument.move(_:)), keyEquivalent: "")
+        fileMenu.addItem(withTitle: "Revert to Saved", action: Selector("revertDocumentToSaved:"), keyEquivalent: "")
+        fileMenu.addItem(withTitle: "Export as PDF…", action: #selector(NSDocument.saveToPDF(_:)), keyEquivalent: "")
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(withTitle: "Page Setup…", action: Selector("runPageLayout:"), keyEquivalent: "")
+        fileMenu.addItem(withTitle: "Print…", action: #selector(NSDocument.printDocument(_:)), keyEquivalent: "p")
+        main.addItem(fileItem)
+        fileItem.submenu = fileMenu
+
+        let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: "Edit")
+        let undoItem = NSMenuItem(title: "Undo", action: #selector(undo(_:)), keyEquivalent: "z")
+        undoItem.target = self
+        editMenu.addItem(undoItem)
+        let redoItem = NSMenuItem(title: "Redo", action: #selector(redo(_:)), keyEquivalent: "Z")
+        redoItem.target = self
+        editMenu.addItem(redoItem)
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let insertBreaks = NSMenuItem(title: "Insert", action: nil, keyEquivalent: "")
+        let breakMenu = NSMenu(title: "Insert")
+        for (title, selector) in [("Line Break", "insertLineBreak:"), ("Paragraph Break", "insertNewline:"), ("Page Break", "insertPageBreak:")] {
+            breakMenu.addItem(withTitle: title, action: Selector(selector), keyEquivalent: "")
+        }
+        insertBreaks.submenu = breakMenu
+        editMenu.addItem(insertBreaks)
+        editMenu.addItem(withTitle: "Insert Table", action: #selector(TextDocument.insertTable(_:)), keyEquivalent: "")
+        editMenu.addItem(withTitle: "Attach Files…", action: #selector(TextDocument.insertAttachment(_:)), keyEquivalent: "")
+        editMenu.addItem(withTitle: "Add Link…", action: #selector(TextDocument.insertLink(_:)), keyEquivalent: "k")
+        let findItem = NSMenuItem(title: "Find", action: nil, keyEquivalent: "")
+        let findMenu = NSMenu(title: "Find")
+        for (title, action, key, tag) in [("Find…", "performFindPanelAction:", "f", NSFindPanelAction.showFindPanel.rawValue), ("Find and Replace…", "performFindPanelAction:", "", NSFindPanelAction.showFindPanel.rawValue), ("Find Next", "performFindPanelAction:", "g", NSFindPanelAction.next.rawValue), ("Find Previous", "performFindPanelAction:", "G", NSFindPanelAction.previous.rawValue), ("Use Selection for Find", "performFindPanelAction:", "e", NSFindPanelAction.setFindString.rawValue), ("Jump to Selection", "centerSelectionInVisibleArea:", "j", 0), ("Select Paragraph", "selectParagraph:", "", 0)] {
+            let item = NSMenuItem(title: title, action: Selector(action), keyEquivalent: key)
+            item.tag = Int(tag)
+            findMenu.addItem(item)
+        }
+        findItem.submenu = findMenu
+        editMenu.addItem(.separator())
+        editMenu.addItem(findItem)
+        let spellingItem = NSMenuItem(title: "Spelling and Grammar", action: nil, keyEquivalent: "")
+        let spellingMenu = NSMenu(title: "Spelling and Grammar")
+        for (title, selector) in [("Show Spelling and Grammar", "showGuessPanel:"), ("Check Document Now", "checkSpelling:"), ("Check Spelling While Typing", "toggleContinuousSpellChecking:"), ("Check Grammar With Spelling", "toggleGrammarChecking:"), ("Correct Spelling Automatically", "toggleAutomaticSpellingCorrection:")] {
+            spellingMenu.addItem(withTitle: title, action: Selector(selector), keyEquivalent: "")
+        }
+        spellingItem.submenu = spellingMenu
+        editMenu.addItem(spellingItem)
+        let substitutionsItem = NSMenuItem(title: "Substitutions", action: nil, keyEquivalent: "")
+        let substitutionsMenu = NSMenu(title: "Substitutions")
+        for (title, selector) in [("Show Substitutions", "orderFrontSubstitutionsPanel:"), ("Smart Copy/Paste", "toggleSmartInsertDelete:"), ("Smart Quotes", "toggleAutomaticQuoteSubstitution:"), ("Smart Dashes", "toggleAutomaticDashSubstitution:"), ("Smart Links", "toggleAutomaticLinkDetection:"), ("Data Detectors", "toggleAutomaticDataDetection:"), ("Text Replacement", "toggleAutomaticTextReplacement:")] {
+            substitutionsMenu.addItem(withTitle: title, action: Selector(selector), keyEquivalent: "")
+        }
+        substitutionsItem.submenu = substitutionsMenu
+        editMenu.addItem(substitutionsItem)
+        let transformationsItem = NSMenuItem(title: "Transformations", action: nil, keyEquivalent: "")
+        let transformationsMenu = NSMenu(title: "Transformations")
+        for (title, selector) in [("Make Upper Case", "uppercaseWord:"), ("Make Lower Case", "lowercaseWord:"), ("Capitalize", "capitalizeWord:")] {
+            transformationsMenu.addItem(withTitle: title, action: Selector(selector), keyEquivalent: "")
+        }
+        transformationsItem.submenu = transformationsMenu
+        editMenu.addItem(transformationsItem)
+        let speechItem = NSMenuItem(title: "Speech", action: nil, keyEquivalent: "")
+        let speechMenu = NSMenu(title: "Speech")
+        speechMenu.addItem(withTitle: "Start Speaking", action: Selector("startSpeaking:"), keyEquivalent: "")
+        speechMenu.addItem(withTitle: "Stop Speaking", action: Selector("stopSpeaking:"), keyEquivalent: "")
+        speechItem.submenu = speechMenu
+        editMenu.addItem(speechItem)
+        editMenu.addItem(withTitle: "Emoji & Symbols", action: #selector(NSApplication.orderFrontCharacterPalette(_:)), keyEquivalent: "")
+        main.addItem(editItem)
+        editItem.submenu = editMenu
+
+        let formatItem = NSMenuItem(title: "Format", action: nil, keyEquivalent: "")
+        let formatMenu = NSMenu(title: "Format")
+        let richItem = NSMenuItem(title: "Make Rich Text", action: #selector(TextDocument.makeRichText(_:)), keyEquivalent: "t")
+        formatMenu.addItem(richItem)
+        let plainItem = NSMenuItem(title: "Make Plain Text", action: #selector(TextDocument.makePlainText(_:)), keyEquivalent: "T")
+        formatMenu.addItem(plainItem)
+        formatMenu.addItem(.separator())
+        for (title, selector, key) in [("Bold", "toggleBoldface:", "b"), ("Italic", "toggleItalics:", "i"), ("Underline", "underline:", "u")] {
+            formatMenu.addItem(withTitle: title, action: Selector(selector), keyEquivalent: key)
+        }
+        let fontsItem = NSMenuItem(title: "Show Fonts", action: Selector("orderFrontFontPanel:"), keyEquivalent: "t")
+        fontsItem.target = NSFontManager.shared
+        formatMenu.addItem(fontsItem)
+        formatMenu.addItem(withTitle: "Show Colors", action: #selector(NSApplication.orderFrontColorPanel(_:)), keyEquivalent: "")
+        formatMenu.addItem(.separator())
+        let alignment = NSMenuItem(title: "Text Alignment", action: nil, keyEquivalent: "")
+        let alignmentMenu = NSMenu(title: "Text Alignment")
+        for (title, selector) in [("Align Left", "alignLeft:"), ("Center", "alignCenter:"), ("Align Right", "alignRight:"), ("Justify", "alignJustified:")] {
+            alignmentMenu.addItem(withTitle: title, action: Selector(selector), keyEquivalent: "")
+        }
+        alignment.submenu = alignmentMenu
+        formatMenu.addItem(alignment)
+        formatMenu.addItem(withTitle: "Show Paragraph Styles", action: Selector("orderFrontStylesPanel:"), keyEquivalent: "")
+        formatMenu.addItem(.separator())
+        let rulerItem = NSMenuItem(title: "Show Ruler", action: #selector(TextDocument.toggleRuler(_:)), keyEquivalent: "r")
+        formatMenu.addItem(rulerItem)
+        formatMenu.addItem(withTitle: "Wrap to Page", action: #selector(TextDocument.togglePageWrap(_:)), keyEquivalent: "")
+        formatMenu.addItem(withTitle: "Prevent Editing", action: #selector(TextDocument.toggleEditingProtection(_:)), keyEquivalent: "")
+        let sizeMenu = NSMenu(title: "Size")
+        for (title, tag) in [("Larger", 3), ("Smaller", 4)] {
+            let item = NSMenuItem(title: title, action: #selector(NSFontManager.modifyFont(_:)), keyEquivalent: "")
+            item.target = NSFontManager.shared
+            item.tag = tag
+            sizeMenu.addItem(item)
+        }
+        let sizeItem = NSMenuItem(title: "Size", action: nil, keyEquivalent: "")
+        sizeItem.submenu = sizeMenu
+        formatMenu.addItem(sizeItem)
+        main.addItem(formatItem)
+        formatItem.submenu = formatMenu
+
+        let viewItem = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
+        let viewMenu = NSMenu(title: "View")
+        viewMenu.addItem(withTitle: "Enter Full Screen", action: #selector(NSWindow.toggleFullScreen(_:)), keyEquivalent: "f")
+        viewMenu.addItem(withTitle: "Hide Toolbar", action: Selector("toggleToolbarShown:"), keyEquivalent: "")
+        viewMenu.addItem(withTitle: "Customize Toolbar…", action: Selector("runToolbarCustomizationPalette:"), keyEquivalent: "")
+        main.addItem(viewItem)
+        viewItem.submenu = viewMenu
+        let windowItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.miniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.zoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        windowItem.submenu = windowMenu
+        NSApplication.shared.windowsMenu = windowMenu
+        main.addItem(windowItem)
+        let helpItem = NSMenuItem(title: "Help", action: nil, keyEquivalent: "")
+        let helpMenu = NSMenu(title: "Help")
+        helpMenu.addItem(withTitle: "FreeDEdit Help", action: Selector("showHelp:"), keyEquivalent: "?")
+        helpItem.submenu = helpMenu
+        main.addItem(helpItem)
+        NSApplication.shared.mainMenu = main
+    }
+
+    @MainActor @objc private func showSettingsWindow(_ sender: Any?) {
+        SettingsWindowController.shared.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @MainActor @objc private func newDocument(_ sender: Any?) {
+        do { try createNewDocument() }
+        catch { NSApp.presentError(error) }
+    }
+
+    @MainActor private func createNewDocument() throws {
+        let type = (UserDefaults.standard.object(forKey: "DefaultRichText") as? Bool ?? true)
+            ? UTType.rtf.identifier : UTType.plainText.identifier
+        guard let document = try NSDocumentController.shared.makeUntitledDocument(ofType: type) as? TextDocument else {
+            throw NSError(domain: "FreeDEdit", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not create a new document."])
+        }
+        NSDocumentController.shared.addDocument(document)
+        document.makeWindowControllers()
+        document.showWindows()
+    }
+
+    @MainActor @objc private func openDocument(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = TextDocument.openableTypes
+        let accessory = NSStackView()
+        accessory.orientation = .vertical
+        accessory.alignment = .leading
+        accessory.spacing = 8
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        row.addArrangedSubview(NSTextField(labelWithString: "Plain Text Encoding:"))
+        let encoding = NSPopUpButton(frame: .zero, pullsDown: false)
+        encoding.addItems(withTitles: TextDocument.openEncodings.map(\.name))
+        let preferred = UserDefaults.standard.integer(forKey: "PlainTextEncoding")
+        encoding.selectItem(at: TextDocument.openEncodings.firstIndex(where: { Int($0.value) == preferred }) ?? 0)
+        row.addArrangedSubview(encoding)
+        let ignoreFormatting = NSButton(checkboxWithTitle: "Ignore rich text commands", target: nil, action: nil)
+        ignoreFormatting.state = (UserDefaults.standard.object(forKey: "IgnoreRichText") as? Bool ?? false) ? .on : .off
+        accessory.addArrangedSubview(row)
+        accessory.addArrangedSubview(ignoreFormatting)
+        accessory.frame = NSRect(x: 0, y: 0, width: 390, height: 62)
+        panel.accessoryView = accessory
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let index = encoding.indexOfSelectedItem
+        let value = TextDocument.openEncodings.indices.contains(index) ? TextDocument.openEncodings[index].value : 0
+        TextDocument.pendingOpenOptions = .init(encoding: String.Encoding(rawValue: value),
+                                                 ignoreRichText: ignoreFormatting.state == .on)
+        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
+            TextDocument.pendingOpenOptions = nil
+            if let error { NSApp.presentError(error) }
+        }
+    }
+
+    @MainActor @objc private func undo(_ sender: Any?) { NSApp.keyWindow?.undoManager?.undo() }
+    @MainActor @objc private func redo(_ sender: Any?) { NSApp.keyWindow?.undoManager?.redo() }
+
+    @MainActor @objc private func openRecentDocument(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
+            if let error { NSApp.presentError(error) }
+        }
+    }
+
+    @MainActor func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === recentDocumentsMenu else { return }
+        menu.removeAllItems()
+        let urls = NSDocumentController.shared.recentDocumentURLs
+        if urls.isEmpty {
+            let item = NSMenuItem(title: "No Recent Documents", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        } else {
+            for url in urls {
+                let item = NSMenuItem(title: url.lastPathComponent, action: #selector(openRecentDocument(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = url
+                menu.addItem(item)
+            }
+        }
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Clear Menu", action: #selector(NSDocumentController.clearRecentDocuments(_:)), keyEquivalent: "")
+    }
+
+}
+
+@MainActor
+final class SettingsWindowController: NSWindowController {
+    static let shared = SettingsWindowController()
+    private var settingsScrollViews: [NSScrollView] = []
+
+    private init() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 620),
+                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.title = "Settings"
+        window.center()
+        let options: [(String, String, Bool)] = [
+            ("DefaultRichText", "Start new documents in rich text", true),
+            ("WrapToPage", "Wrap text to page margins", false),
+            ("ShowRuler", "Show the ruler in rich-text documents", true),
+            ("CheckSpellingAsYouType", "Check spelling while typing", true),
+            ("CheckGrammarWithSpelling", "Check grammar with spelling", false),
+            ("CorrectSpellingAutomatically", "Correct spelling automatically", true),
+            ("SmartQuotes", "Use smart quotes", true),
+            ("SmartDashes", "Use smart dashes", true),
+            ("SmartLinks", "Detect links automatically", false),
+            ("TextReplacement", "Apply text replacements", true),
+            ("DataDetectors", "Detect dates and other data", false),
+            ("SmartCopyPaste", "Use smart copy and paste", true),
+            ("SmartSubstitutionsEnabledInRichTextOnly", "Limit smart quotes and dashes to rich text", true),
+            ("CheckSpellingAsYouTypeEnabledInRichTextOnly", "Limit spelling tools to rich text", false)
+        ]
+        let stack = NSStackView()
+        var checkboxes: [NSButton] = []
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 14
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        var fontControls: [NSPopUpButton] = []
+        let heading = NSTextField(labelWithString: "New Document")
+        heading.font = .boldSystemFont(ofSize: 15)
+        stack.addArrangedSubview(heading)
+        for option in options.prefix(1) {
+            let checkbox = NSButton(checkboxWithTitle: option.1, target: nil, action: nil)
+            checkbox.identifier = NSUserInterfaceItemIdentifier(option.0)
+            checkbox.state = (UserDefaults.standard.object(forKey: option.0) as? Bool ?? option.2) ? .on : .off
+            stack.addArrangedSubview(checkbox)
+            checkboxes.append(checkbox)
+        }
+        let metrics = NSStackView()
+        metrics.orientation = .horizontal
+        metrics.alignment = .centerY
+        metrics.spacing = 8
+        metrics.addArrangedSubview(NSTextField(labelWithString: "Plain text size:"))
+        let widthField = NSTextField(string: "\(UserDefaults.standard.object(forKey: "WidthInChars") as? Int ?? 96)")
+        widthField.identifier = NSUserInterfaceItemIdentifier("WidthInChars")
+        widthField.widthAnchor.constraint(equalToConstant: 48).isActive = true
+        metrics.addArrangedSubview(widthField)
+        metrics.addArrangedSubview(NSTextField(labelWithString: "characters by"))
+        let heightField = NSTextField(string: "\(UserDefaults.standard.object(forKey: "HeightInChars") as? Int ?? 30)")
+        heightField.identifier = NSUserInterfaceItemIdentifier("HeightInChars")
+        heightField.widthAnchor.constraint(equalToConstant: 48).isActive = true
+        metrics.addArrangedSubview(heightField)
+        metrics.addArrangedSubview(NSTextField(labelWithString: "lines"))
+        stack.addArrangedSubview(metrics)
+
+        let fontTitle = NSTextField(labelWithString: "Default fonts")
+        fontTitle.font = .boldSystemFont(ofSize: 15)
+        stack.addArrangedSubview(fontTitle)
+        for (title, key, defaultName, defaultSize) in [("Plain text", "Plain", "Menlo", 11.0), ("Rich text", "Rich", "Helvetica", 12.0)] {
+            let row = NSStackView()
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 8
+            row.addArrangedSubview(NSTextField(labelWithString: title))
+            let font = NSPopUpButton(frame: .zero, pullsDown: false)
+            font.identifier = NSUserInterfaceItemIdentifier("\(key)Font")
+            font.addItems(withTitles: ["Menlo", "Helvetica", "Arial", "Times New Roman", "System"])
+            let storedFont = UserDefaults.standard.string(forKey: "Default\(key)Font") ?? defaultName
+            font.selectItem(withTitle: storedFont)
+            fontControls.append(font)
+            row.addArrangedSubview(font)
+            let size = NSPopUpButton(frame: .zero, pullsDown: false)
+            size.identifier = NSUserInterfaceItemIdentifier("\(key)Size")
+            size.addItems(withTitles: (8...36).map(String.init))
+            size.selectItem(withTitle: "\(UserDefaults.standard.object(forKey: "Default\(key)Size") as? Int ?? Int(defaultSize))")
+            fontControls.append(size)
+            row.addArrangedSubview(size)
+            stack.addArrangedSubview(row)
+        }
+
+        let writing = NSTextField(labelWithString: "Writing")
+        writing.font = .boldSystemFont(ofSize: 15)
+        stack.addArrangedSubview(writing)
+        for option in options.dropFirst() {
+            let checkbox = NSButton(checkboxWithTitle: option.1, target: nil, action: nil)
+            checkbox.identifier = NSUserInterfaceItemIdentifier(option.0)
+            checkbox.state = (UserDefaults.standard.object(forKey: option.0) as? Bool ?? option.2) ? .on : .off
+            stack.addArrangedSubview(checkbox)
+            checkboxes.append(checkbox)
+        }
+
+        let openSave = NSStackView()
+        openSave.orientation = .vertical
+        openSave.alignment = .leading
+        openSave.spacing = 14
+        openSave.translatesAutoresizingMaskIntoConstraints = false
+        let openSaveTitle = NSTextField(labelWithString: "Open and Save")
+        openSaveTitle.font = .boldSystemFont(ofSize: 15)
+        openSave.addArrangedSubview(openSaveTitle)
+        var openSaveCheckboxes: [NSButton] = []
+        for option in [("IgnoreRichText", "Show RTF files as source", false),
+                       ("IgnoreHTML", "Show HTML files as source", false),
+                       ("AddExtensionToNewPlainTextFiles", "Add .txt extension to plain-text files", true),
+                       ("PreserveWhitespace", "Preserve white space when saving HTML", true),
+                       ("UseTransitionalDocType", "Use transitional HTML output", false),
+                       ("UseXHTMLDocType", "Use XHTML output", false)] {
+            let control = NSButton(checkboxWithTitle: option.1, target: nil, action: nil)
+            control.identifier = NSUserInterfaceItemIdentifier(option.0)
+            control.state = (UserDefaults.standard.object(forKey: option.0) as? Bool ?? option.2) ? .on : .off
+            openSave.addArrangedSubview(control)
+            openSaveCheckboxes.append(control)
+        }
+        var encodingPopups: [NSPopUpButton] = []
+        for (labelText, key) in [("Open plain-text files using:", "PlainTextEncoding"),
+                                 ("Save plain-text files using:", "PlainTextEncodingForWrite")] {
+            let row = NSStackView()
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 8
+            row.addArrangedSubview(NSTextField(labelWithString: labelText))
+            let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+            popup.identifier = NSUserInterfaceItemIdentifier(key)
+            popup.addItems(withTitles: ["Automatic", "Unicode (UTF-8)", "Unicode (UTF-16)", "Western (Mac OS Roman)"])
+            let value = UserDefaults.standard.integer(forKey: key)
+            popup.selectItem(at: [0, 4, 10, 30].firstIndex(of: value) ?? 0)
+            row.addArrangedSubview(popup)
+            openSave.addArrangedSubview(row)
+            encodingPopups.append(popup)
+        }
+        let htmlTitle = NSTextField(labelWithString: "HTML export")
+        htmlTitle.font = .boldSystemFont(ofSize: 15)
+        openSave.addArrangedSubview(htmlTitle)
+        let htmlEncoding = NSStackView()
+        htmlEncoding.orientation = .horizontal
+        htmlEncoding.alignment = .centerY
+        htmlEncoding.spacing = 8
+        htmlEncoding.addArrangedSubview(NSTextField(labelWithString: "Character encoding:"))
+        let htmlEncodingPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        htmlEncodingPopup.identifier = NSUserInterfaceItemIdentifier("HTMLExportEncoding")
+        htmlEncodingPopup.addItem(withTitle: "Unicode (UTF-8)")
+        htmlEncodingPopup.selectItem(withTitle: UserDefaults.standard.string(forKey: "HTMLExportEncoding") ?? "Unicode (UTF-8)")
+        htmlEncoding.addArrangedSubview(htmlEncodingPopup)
+        openSave.addArrangedSubview(htmlEncoding)
+        let panePicker = NSSegmentedControl(labels: ["New Document", "Open and Save"], trackingMode: .selectOne, target: nil, action: nil)
+        panePicker.selectedSegment = 0
+        panePicker.translatesAutoresizingMaskIntoConstraints = false
+        window.initialFirstResponder = checkboxes.first
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.documentView = stack
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        let openSaveScroll = NSScrollView()
+        openSaveScroll.hasVerticalScroller = true
+        openSaveScroll.documentView = openSave
+        openSaveScroll.translatesAutoresizingMaskIntoConstraints = false
+        openSaveScroll.isHidden = true
+        window.contentView?.addSubview(panePicker)
+        window.contentView?.addSubview(scroll)
+        window.contentView?.addSubview(openSaveScroll)
+        NSLayoutConstraint.activate([
+            panePicker.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor, constant: 20),
+            panePicker.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor, constant: -20),
+            panePicker.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: 12),
+            scroll.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor, constant: 20),
+            scroll.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor, constant: -20),
+            scroll.topAnchor.constraint(equalTo: panePicker.bottomAnchor, constant: 10),
+            scroll.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor, constant: -20),
+            stack.widthAnchor.constraint(equalTo: scroll.widthAnchor, constant: -12),
+            openSaveScroll.leadingAnchor.constraint(equalTo: scroll.leadingAnchor),
+            openSaveScroll.trailingAnchor.constraint(equalTo: scroll.trailingAnchor),
+            openSaveScroll.topAnchor.constraint(equalTo: scroll.topAnchor),
+            openSaveScroll.bottomAnchor.constraint(equalTo: scroll.bottomAnchor),
+            openSave.widthAnchor.constraint(equalTo: openSaveScroll.widthAnchor, constant: -12)
+        ])
+        super.init(window: window)
+        settingsScrollViews = [scroll, openSaveScroll]
+        window.contentView?.layoutSubtreeIfNeeded()
+        scroll.layoutSubtreeIfNeeded()
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, stack.frame.height - scroll.contentView.bounds.height)))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        panePicker.target = self
+        panePicker.action = #selector(selectPane(_:))
+        checkboxes.forEach {
+            $0.target = self
+            $0.action = #selector(settingChanged(_:))
+        }
+        widthField.target = self
+        widthField.action = #selector(numberChanged(_:))
+        heightField.target = self
+        heightField.action = #selector(numberChanged(_:))
+        fontControls.forEach {
+            $0.target = self
+            $0.action = #selector(fontChanged(_:))
+        }
+        (checkboxes + openSaveCheckboxes).forEach {
+            $0.target = self
+            $0.action = #selector(settingChanged(_:))
+        }
+        encodingPopups.forEach {
+            $0.target = self
+            $0.action = #selector(encodingChanged(_:))
+        }
+        htmlEncodingPopup.target = self
+        htmlEncodingPopup.action = #selector(stringSettingChanged(_:))
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    @objc private func settingChanged(_ sender: NSButton) {
+        guard let key = sender.identifier?.rawValue else { return }
+        UserDefaults.standard.set(sender.state == .on, forKey: key)
+    }
+
+    @objc private func numberChanged(_ sender: NSTextField) {
+        guard let key = sender.identifier?.rawValue, let value = Int(sender.stringValue), value > 0 else { return }
+        UserDefaults.standard.set(value, forKey: key)
+    }
+
+    @objc private func fontChanged(_ sender: NSPopUpButton) {
+        guard let key = sender.identifier?.rawValue, let title = sender.titleOfSelectedItem else { return }
+        let familyKey = key.hasSuffix("Font")
+        let documentKind = key.hasPrefix("Plain") ? "Plain" : "Rich"
+        UserDefaults.standard.set(familyKey ? title : Int(title) ?? 12,
+                                  forKey: "Default\(documentKind)\(familyKey ? "Font" : "Size")")
+    }
+
+    @objc private func encodingChanged(_ sender: NSPopUpButton) {
+        guard let key = sender.identifier?.rawValue else { return }
+        let values = [0, 4, 10, 30]
+        guard values.indices.contains(sender.indexOfSelectedItem) else { return }
+        UserDefaults.standard.set(values[sender.indexOfSelectedItem], forKey: key)
+    }
+
+    @objc private func stringSettingChanged(_ sender: NSPopUpButton) {
+        guard let key = sender.identifier?.rawValue else { return }
+        UserDefaults.standard.set(sender.titleOfSelectedItem, forKey: key)
+    }
+
+    @objc private func selectPane(_ sender: NSSegmentedControl) {
+        guard settingsScrollViews.indices.contains(sender.selectedSegment) else { return }
+        for (index, scroll) in settingsScrollViews.enumerated() {
+            scroll.isHidden = index != sender.selectedSegment
+            guard index == sender.selectedSegment else { continue }
+            scroll.layoutSubtreeIfNeeded()
+            let documentHeight = scroll.documentView?.frame.height ?? 0
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, documentHeight - scroll.contentView.bounds.height)))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+    }
+}
+
+@objc(TextDocument)
+final class TextDocument: NSDocument {
+    private var text = NSAttributedString(string: "")
+    private weak var editor: NSTextView?
+    private var isPlainText = (UserDefaults.standard.object(forKey: "DefaultRichText") as? Bool) == false
+    private var plainTextEncoding: String.Encoding = .utf8
+
+    struct OpenOptions {
+        var encoding: String.Encoding
+        var ignoreRichText: Bool
+    }
+    static var pendingOpenOptions: OpenOptions?
+    static let openableTypes: [UTType] = [
+        .plainText, .rtf, .html,
+        UTType("com.apple.rtfd")!, UTType("com.apple.webarchive")!,
+        UTType("org.oasis-open.opendocument.text")!,
+        UTType("org.openxmlformats.wordprocessingml.document")!,
+        UTType("com.microsoft.word.wordml")!, UTType("com.microsoft.word.doc")!
+    ]
+
+    override class var autosavesInPlace: Bool { true }
+    override class var readableTypes: [String] {
+        [UTType.plainText.identifier, UTType.rtf.identifier, "com.apple.rtfd", UTType.html.identifier,
+         "com.apple.webarchive", "org.oasis-open.opendocument.text",
+         "org.openxmlformats.wordprocessingml.document", "com.microsoft.word.wordml", "com.microsoft.word.doc"]
+    }
+    override class var writableTypes: [String] { readableTypes }
+
+    override func makeWindowControllers() {
+        let plainWidth = UserDefaults.standard.object(forKey: "WidthInChars") as? Int ?? 96
+        let plainHeight = UserDefaults.standard.object(forKey: "HeightInChars") as? Int ?? 30
+        let windowSize = isPlainText ? NSSize(width: CGFloat(plainWidth) * 8, height: CGFloat(plainHeight) * 18) : NSSize(width: 720, height: 520)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: windowSize),
+                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                              backing: .buffered, defer: false)
+        window.center()
+        window.title = "Untitled"
+
+        let scroll = NSScrollView(frame: window.contentView?.bounds ?? .zero)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.hasVerticalScroller = true
+        let wrapToPage = UserDefaults.standard.object(forKey: "WrapToPage") as? Bool ?? false
+        scroll.hasHorizontalScroller = !wrapToPage
+        scroll.hasHorizontalRuler = true
+        scroll.borderType = .noBorder
+        let storage = NSTextStorage(attributedString: text)
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(containerSize: NSSize(width: wrapToPage ? 612 : scroll.contentView.bounds.width,
+                                                               height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = !wrapToPage
+        container.heightTracksTextView = false
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        let view = NSTextView(frame: scroll.contentView.bounds, textContainer: container)
+        view.minSize = NSSize(width: 0, height: 0)
+        view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        view.isVerticallyResizable = true
+        view.isHorizontallyResizable = !wrapToPage
+        view.autoresizingMask = [.width]
+        view.isRichText = !isPlainText
+        view.usesFindBar = true
+        view.usesFindPanel = true
+        view.isIncrementalSearchingEnabled = true
+        view.isEditable = true
+        let showRuler = UserDefaults.standard.object(forKey: "ShowRuler") as? Bool ?? true
+        view.usesRuler = !isPlainText && showRuler
+        view.allowsUndo = true
+        let richOnlySpelling = UserDefaults.standard.object(forKey: "CheckSpellingAsYouTypeEnabledInRichTextOnly") as? Bool ?? false
+        view.isContinuousSpellCheckingEnabled = !(isPlainText && richOnlySpelling) && (UserDefaults.standard.object(forKey: "CheckSpellingAsYouType") as? Bool ?? true)
+        view.isGrammarCheckingEnabled = UserDefaults.standard.object(forKey: "CheckGrammarWithSpelling") as? Bool ?? false
+        view.isAutomaticSpellingCorrectionEnabled = !(isPlainText && richOnlySpelling) && (UserDefaults.standard.object(forKey: "CorrectSpellingAutomatically") as? Bool ?? true)
+        let richOnlyPunctuation = UserDefaults.standard.object(forKey: "SmartSubstitutionsEnabledInRichTextOnly") as? Bool ?? true
+        view.isAutomaticQuoteSubstitutionEnabled = !(isPlainText && richOnlyPunctuation) && (UserDefaults.standard.object(forKey: "SmartQuotes") as? Bool ?? true)
+        view.isAutomaticDashSubstitutionEnabled = !(isPlainText && richOnlyPunctuation) && (UserDefaults.standard.object(forKey: "SmartDashes") as? Bool ?? true)
+        view.isAutomaticLinkDetectionEnabled = UserDefaults.standard.object(forKey: "SmartLinks") as? Bool ?? false
+        view.isAutomaticDataDetectionEnabled = UserDefaults.standard.object(forKey: "DataDetectors") as? Bool ?? false
+        view.isAutomaticTextReplacementEnabled = UserDefaults.standard.object(forKey: "TextReplacement") as? Bool ?? true
+        view.smartInsertDeleteEnabled = UserDefaults.standard.object(forKey: "SmartCopyPaste") as? Bool ?? true
+        let documentKind = isPlainText ? "Plain" : "Rich"
+        let fontName = UserDefaults.standard.string(forKey: "Default\(documentKind)Font") ?? (isPlainText ? "Menlo" : "Helvetica")
+        let fontSize = CGFloat(UserDefaults.standard.object(forKey: "Default\(documentKind)Size") as? Int ?? (isPlainText ? 11 : 12))
+        view.font = fontName == "System" ? NSFont.systemFont(ofSize: fontSize) : (NSFont(name: fontName, size: fontSize) ?? NSFont.systemFont(ofSize: fontSize))
+        view.textContainerInset = NSSize(width: 5, height: 8)
+        view.delegate = self
+        scroll.documentView = view
+        window.contentView?.addSubview(scroll)
+        editor = view
+        let toolbar = NSToolbar(identifier: "FreeDEditFormatting")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconAndLabel
+        window.toolbar = toolbar
+        scroll.rulersVisible = view.usesRuler
+        let controller = NSWindowController(window: window)
+        addWindowController(controller)
+    }
+
+    override func data(ofType typeName: String) throws -> Data {
+        guard let editor else { return text.string.data(using: .utf8) ?? Data() }
+        let range = NSRange(location: 0, length: editor.textStorage?.length ?? 0)
+        if typeName == UTType.html.identifier {
+            return try htmlExportData(from: editor.attributedString(), range: range)
+        }
+        if let documentType = attributedDocumentType(for: typeName) {
+            return try editor.attributedString().data(from: range, documentAttributes: [.documentType: documentType])
+        }
+        return editor.string.data(using: plainTextEncoding) ?? editor.string.data(using: .utf8) ?? Data()
+    }
+
+    private func htmlExportData(from value: NSAttributedString, range: NSRange) throws -> Data {
+        let encodingName = UserDefaults.standard.string(forKey: "HTMLExportEncoding") ?? "Unicode (UTF-8)"
+        let encoding: String.Encoding = switch encodingName {
+        case "Unicode (UTF-8)": .utf8
+        case "Unicode (UTF-16)": .utf16
+        case "Western (Mac OS Roman)": .macOSRoman
+        default: .utf8
+        }
+        let attributes: [NSAttributedString.DocumentAttributeKey: Any] = [
+            .documentType: NSAttributedString.DocumentType.html,
+            .characterEncoding: Int(encoding.rawValue)
+        ]
+        let data = try value.data(from: range, documentAttributes: attributes)
+        guard var html = String(data: data, encoding: encoding) else { return data }
+
+        let transitional = UserDefaults.standard.object(forKey: "UseTransitionalDocType") as? Bool ?? false
+        let xhtml = UserDefaults.standard.object(forKey: "UseXHTMLDocType") as? Bool ?? false
+        let declaration: String
+        if xhtml && transitional {
+            declaration = "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">"
+        } else if xhtml {
+            declaration = "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Strict//EN\" \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd\">"
+        } else if transitional {
+            declaration = "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\" \"http://www.w3.org/TR/html4/loose.dtd\">"
+        } else {
+            declaration = "<!DOCTYPE html PUBLIC \"-//W3C//DTD HTML 4.01//EN\" \"http://www.w3.org/TR/html4/strict.dtd\">"
+        }
+        if let range = html.range(of: #"<!DOCTYPE[^>]*>"#, options: .regularExpression) {
+            html.replaceSubrange(range, with: declaration)
+        }
+        if xhtml {
+            html = html.replacingOccurrences(of: "<html>", with: "<html xmlns=\"http://www.w3.org/1999/xhtml\">")
+            for tag in ["meta", "br", "hr", "img", "link", "input"] {
+                let expression = "<\(tag)(\\s[^>]*)?>"
+                let replacement = "<\(tag)$1 />"
+                html = html.replacingOccurrences(of: expression, with: replacement, options: .regularExpression)
+            }
+        }
+        return html.data(using: encoding) ?? data
+    }
+
+    override func prepareSavePanel(_ savePanel: NSSavePanel) -> Bool {
+        guard isPlainText else { return true }
+        savePanel.allowedContentTypes = [.plainText]
+        if UserDefaults.standard.object(forKey: "AddExtensionToNewPlainTextFiles") as? Bool ?? true,
+           !savePanel.nameFieldStringValue.isEmpty,
+           URL(fileURLWithPath: savePanel.nameFieldStringValue).pathExtension.isEmpty {
+            savePanel.nameFieldStringValue += ".txt"
+        }
+        let row = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 34))
+        let label = NSTextField(labelWithString: "Plain Text Encoding:")
+        label.frame = NSRect(x: 0, y: 7, width: 140, height: 20)
+        let popup = NSPopUpButton(frame: NSRect(x: 140, y: 3, width: 210, height: 26), pullsDown: false)
+        popup.addItems(withTitles: Self.encodings.map(\.name))
+        let preferred = UserDefaults.standard.integer(forKey: "PlainTextEncodingForWrite")
+        let selectedEncoding = preferred == 0 ? plainTextEncoding.rawValue : UInt(preferred)
+        popup.selectItem(at: Self.encodings.firstIndex(where: { $0.value == selectedEncoding }) ?? 0)
+        plainTextEncoding = String.Encoding(rawValue: selectedEncoding)
+        popup.target = self
+        popup.action = #selector(saveEncodingChanged(_:))
+        row.addSubview(label)
+        row.addSubview(popup)
+        savePanel.accessoryView = row
+        return true
+    }
+
+    @objc private func saveEncodingChanged(_ sender: NSPopUpButton) {
+        guard Self.encodings.indices.contains(sender.indexOfSelectedItem) else { return }
+        let value = Self.encodings[sender.indexOfSelectedItem].value
+        plainTextEncoding = String.Encoding(rawValue: value)
+        UserDefaults.standard.set(Int(value), forKey: "PlainTextEncodingForWrite")
+    }
+
+    override func fileWrapper(ofType typeName: String) throws -> FileWrapper {
+        guard typeName == "com.apple.rtfd" else { return try super.fileWrapper(ofType: typeName) }
+        let contents = editor?.attributedString() ?? text
+        return try contents.fileWrapper(from: NSRange(location: 0, length: contents.length),
+                                        documentAttributes: [.documentType: NSAttributedString.DocumentType.rtfd])
+    }
+
+
+    @objc func makePlainText(_ sender: Any?) {
+        guard let editor, editor.isRichText else { return }
+        let plain = editor.string
+        editor.isRichText = false
+        editor.usesRuler = false
+        editor.enclosingScrollView?.rulersVisible = false
+        editor.string = plain
+        text = NSAttributedString(string: plain)
+        isPlainText = true
+        updateChangeCount(.changeDone)
+    }
+
+    @objc func makeRichText(_ sender: Any?) {
+        guard let editor, !editor.isRichText else { return }
+        editor.isRichText = true
+        let showRuler = UserDefaults.standard.object(forKey: "ShowRuler") as? Bool ?? true
+        editor.usesRuler = showRuler
+        editor.enclosingScrollView?.rulersVisible = showRuler
+        isPlainText = false
+        text = editor.attributedString()
+        updateChangeCount(.changeDone)
+    }
+
+    @objc func toggleRuler(_ sender: Any?) {
+        guard let editor, editor.isRichText else { return }
+        editor.usesRuler.toggle()
+        editor.enclosingScrollView?.rulersVisible = editor.usesRuler
+        UserDefaults.standard.set(editor.usesRuler, forKey: "ShowRuler")
+    }
+
+    @objc func togglePageWrap(_ sender: Any?) {
+        guard let editor, let scroll = editor.enclosingScrollView, let container = editor.textContainer else { return }
+        let enabled = !((UserDefaults.standard.object(forKey: "WrapToPage") as? Bool) ?? false)
+        UserDefaults.standard.set(enabled, forKey: "WrapToPage")
+        container.containerSize = NSSize(width: enabled ? 612 : scroll.contentView.bounds.width,
+                                         height: CGFloat.greatestFiniteMagnitude)
+        container.widthTracksTextView = !enabled
+        editor.isHorizontallyResizable = !enabled
+        scroll.hasHorizontalScroller = !enabled
+    }
+
+    @objc func toggleEditingProtection(_ sender: Any?) {
+        guard let editor else { return }
+        editor.isEditable.toggle()
+    }
+
+    @objc func insertTable(_ sender: Any?) {
+        guard let editor, editor.isRichText else { return }
+        let table = NSTextTable()
+        table.numberOfColumns = 2
+        table.layoutAlgorithm = .automatic
+        table.collapsesBorders = true
+        let result = NSMutableAttributedString(string: "")
+        for row in 0..<2 {
+            for column in 0..<2 {
+                let block = NSTextTableBlock(table: table, startingRow: row, rowSpan: 1, startingColumn: column, columnSpan: 1)
+                block.setWidth(1, type: .absoluteValueType, for: .border)
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.textBlocks = [block]
+                result.append(NSAttributedString(string: " \n", attributes: [.paragraphStyle: paragraph]))
+            }
+        }
+        let range = editor.selectedRange()
+        editor.textStorage?.replaceCharacters(in: range, with: result)
+        editor.setSelectedRange(NSRange(location: range.location + result.length, length: 0))
+        editor.didChangeText()
+    }
+
+    @objc func insertAttachment(_ sender: Any?) {
+        guard let editor, editor.isRichText else { return }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        guard panel.runModal() == .OK, let url = panel.url,
+              let wrapper = try? FileWrapper(url: url, options: []) else { return }
+        let attachment = NSTextAttachment(fileWrapper: wrapper)
+        let replacement = NSAttributedString(attachment: attachment)
+        let range = editor.selectedRange()
+        editor.textStorage?.replaceCharacters(in: range, with: replacement)
+        editor.setSelectedRange(NSRange(location: range.location + replacement.length, length: 0))
+        editor.didChangeText()
+    }
+
+    @objc func insertLink(_ sender: Any?) {
+        guard let editor, editor.isRichText else { return }
+        let range = editor.selectedRange()
+        guard range.length > 0 else { NSSound.beep(); return }
+        let alert = NSAlert()
+        alert.messageText = "Add Link"
+        let field = NSTextField(string: "https://")
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Add")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn, let url = URL(string: field.stringValue) else { return }
+        editor.textStorage?.addAttribute(.link, value: url, range: range)
+        editor.textStorage?.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+        editor.didChangeText()
+    }
+
+    override func read(from data: Data, ofType typeName: String) throws {
+        let openOptions = Self.pendingOpenOptions
+        Self.pendingOpenOptions = nil
+        let showRTFSource = typeName == UTType.rtf.identifier && (openOptions?.ignoreRichText ?? (UserDefaults.standard.object(forKey: "IgnoreRichText") as? Bool ?? false))
+        let showHTMLSource = typeName == UTType.html.identifier && ((UserDefaults.standard.object(forKey: "IgnoreHTML") as? Bool ?? false) || (openOptions?.ignoreRichText ?? false))
+        if showRTFSource || showHTMLSource {
+            let source = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+            text = NSAttributedString(string: source)
+            isPlainText = true
+            plainTextEncoding = .utf8
+            return
+        }
+        if let documentType = attributedDocumentType(for: typeName) {
+            text = try NSAttributedString(data: data, options: [.documentType: documentType], documentAttributes: nil)
+            isPlainText = false
+        } else {
+            let selected = openOptions?.encoding.rawValue ?? UInt(UserDefaults.standard.integer(forKey: "PlainTextEncoding"))
+            var candidates: [String.Encoding] = []
+            if selected != 0 { candidates.append(String.Encoding(rawValue: selected)) }
+            candidates.append(contentsOf: [.utf8, .utf16, .utf16LittleEndian, .utf16BigEndian, .macOSRoman])
+            var decoded: (String, String.Encoding)?
+            for encoding in candidates where decoded == nil {
+                if let value = String(data: data, encoding: encoding) { decoded = (value, encoding) }
+            }
+            let result = decoded ?? (String(decoding: data, as: UTF8.self), .utf8)
+            text = NSAttributedString(string: result.0)
+            plainTextEncoding = result.1
+            isPlainText = true
+        }
+    }
+
+    override func read(from fileWrapper: FileWrapper, ofType typeName: String) throws {
+        guard typeName == "com.apple.rtfd" else { return try super.read(from: fileWrapper, ofType: typeName) }
+        guard let imported = try NSAttributedString(rtfdFileWrapper: fileWrapper, documentAttributes: nil) else {
+            throw NSError(domain: "FreeDEdit", code: 2, userInfo: [NSLocalizedDescriptionKey: "The RTFD package could not be read."])
+        }
+        text = imported
+        isPlainText = false
+    }
+
+
+    private func attributedDocumentType(for typeName: String) -> NSAttributedString.DocumentType? {
+        switch typeName {
+        case UTType.rtf.identifier: .rtf
+        case "com.apple.rtfd": .rtfd
+        case UTType.html.identifier: .html
+        case "com.apple.webarchive": .webArchive
+        case "com.microsoft.word.doc": .docFormat
+        case "com.microsoft.word.wordml": .wordML
+        case "org.openxmlformats.wordprocessingml.document": .officeOpenXML
+        case "org.oasis-open.opendocument.text": .openDocument
+        default: nil
+        }
+    }
+
+    static let openEncodings: [(name: String, value: UInt)] = [
+        ("Automatic", 0),
+        ("Unicode (UTF-8)", String.Encoding.utf8.rawValue),
+        ("Unicode (UTF-16)", String.Encoding.utf16.rawValue),
+        ("Western (Mac OS Roman)", String.Encoding.macOSRoman.rawValue)
+    ]
+
+    static let encodings: [(name: String, value: UInt)] = [
+        ("Unicode (UTF-8)", String.Encoding.utf8.rawValue),
+        ("Unicode (UTF-16)", String.Encoding.utf16.rawValue),
+        ("Western (Mac OS Roman)", String.Encoding.macOSRoman.rawValue)
+    ]
+
+    override func windowControllerDidLoadNib(_ windowController: NSWindowController) {
+        super.windowControllerDidLoadNib(windowController)
+        editor?.textStorage?.setAttributedString(text)
+    }
+}
+
+extension TextDocument: NSTextViewDelegate {
+    func textDidChange(_ notification: Notification) {
+        guard let editor else { return }
+        text = editor.attributedString()
+        updateChangeCount(.changeDone)
+    }
+}
+
+extension TextDocument: NSToolbarDelegate {
+    private var toolbarIDs: [NSToolbarItem.Identifier] {
+        [.init("bold"), .init("italic"), .init("underline"), .init("strike"), .flexibleSpace,
+         .init("fontFamily"), .init("fontStyle"), .init("fontSize"), .init("textColor"), .init("textBackground")]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarIDs + [.flexibleSpace]
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarIDs
+    }
+
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+                 willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
+        switch itemIdentifier.rawValue {
+        case "bold":
+            item.label = "Bold"
+            item.view = formattingButton("B", tag: 1)
+        case "italic":
+            item.label = "Italic"
+            item.view = formattingButton("I", tag: 2)
+        case "underline":
+            item.label = "Underline"
+            item.view = formattingButton("U", tag: 3)
+        case "strike":
+            item.label = "Strikethrough"
+            item.view = formattingButton("S", tag: 4)
+        case "fontFamily":
+            item.label = "Font"
+            let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 150, height: 26), pullsDown: false)
+            popup.addItems(withTitles: ["Helvetica", "Arial", "Menlo", "Monaco", "Times New Roman", "Courier New"])
+            popup.target = self
+            popup.action = #selector(applyFontFamily(_:))
+            item.view = popup
+        case "fontSize":
+            item.label = "Font Size"
+            let field = NSTextField(string: "12")
+            field.frame = NSRect(x: 0, y: 0, width: 52, height: 25)
+            field.target = self
+            field.action = #selector(applyFontSize(_:))
+            item.view = field
+        case "fontStyle":
+            item.label = "Style"
+            let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 120, height: 26), pullsDown: false)
+            popup.addItems(withTitles: ["Regular", "Bold", "Italic", "Bold Italic"])
+            popup.target = self
+            popup.action = #selector(applyFontStyle(_:))
+            item.view = popup
+        case "textColor":
+            item.label = "Text Color"
+            let colorWell = NSColorWell(frame: NSRect(x: 0, y: 0, width: 38, height: 25))
+            colorWell.color = .black
+            colorWell.target = self
+            colorWell.action = #selector(applyColor(_:))
+            colorWell.tag = 0
+            item.view = colorWell
+        case "textBackground":
+            item.label = "Text Background"
+            let colorWell = NSColorWell(frame: NSRect(x: 0, y: 0, width: 38, height: 25))
+            colorWell.color = .clear
+            colorWell.target = self
+            colorWell.action = #selector(applyColor(_:))
+            colorWell.tag = 1
+            item.view = colorWell
+        default: return nil
+        }
+        return item
+    }
+
+    private func formattingButton(_ title: String, tag: Int) -> NSButton {
+        let button = NSButton(title: title, target: self, action: #selector(toggleToolbarStyle(_:)))
+        button.tag = tag
+        button.bezelStyle = .texturedRounded
+        button.frame = NSRect(x: 0, y: 0, width: 34, height: 25)
+        return button
+    }
+
+    @objc private func toggleToolbarStyle(_ sender: NSButton) {
+        guard let editor else { return }
+        let range = editor.selectedRange()
+        let storage = editor.textStorage
+        let currentFont = editor.font ?? NSFont.systemFont(ofSize: 12)
+        if sender.tag == 3 || sender.tag == 4 {
+            var attributes = editor.typingAttributes
+            let key: NSAttributedString.Key = sender.tag == 3 ? .underlineStyle : .strikethroughStyle
+            let value = (attributes[key] as? Int ?? 0) == 0 ? NSUnderlineStyle.single.rawValue : 0
+            attributes[key] = value
+            editor.typingAttributes = attributes
+            if range.length > 0 { storage?.addAttribute(key, value: value, range: range) }
+        } else {
+            let trait = sender.tag == 1 ? NSFontTraitMask.boldFontMask : NSFontTraitMask.italicFontMask
+            let converted = NSFontManager.shared.convert(currentFont, toHaveTrait: trait)
+            if range.length > 0 {
+                editor.textStorage?.addAttribute(.font, value: converted, range: range)
+            } else {
+                var attributes = editor.typingAttributes
+                attributes[.font] = converted
+                editor.typingAttributes = attributes
+            }
+        }
+        editor.didChangeText()
+    }
+
+    @objc private func applyFontSize(_ sender: NSTextField) {
+        guard let editor, let size = Double(sender.stringValue), size > 0 else { return }
+        let font = editor.font ?? NSFont.systemFont(ofSize: size)
+        let sizedFont = NSFont(descriptor: font.fontDescriptor, size: size) ?? NSFont.systemFont(ofSize: size)
+        let range = editor.selectedRange()
+        if range.length > 0 {
+            editor.textStorage?.enumerateAttribute(.font, in: range, options: []) { value, subrange, _ in
+                let existing = value as? NSFont ?? font
+                let resized = NSFont(descriptor: existing.fontDescriptor, size: size) ?? sizedFont
+                editor.textStorage?.addAttribute(.font, value: resized, range: subrange)
+            }
+        } else {
+            var attributes = editor.typingAttributes
+            attributes[.font] = sizedFont
+            editor.typingAttributes = attributes
+        }
+        editor.didChangeText()
+    }
+
+    @objc private func applyFontFamily(_ sender: NSPopUpButton) {
+        guard let editor, let family = sender.titleOfSelectedItem else { return }
+        let range = editor.selectedRange()
+        let currentFont = editor.font ?? NSFont.systemFont(ofSize: 12)
+        let converted = NSFontManager.shared.convert(currentFont, toFamily: family)
+        if range.length > 0 { editor.textStorage?.addAttribute(.font, value: converted, range: range) }
+        else {
+            var attributes = editor.typingAttributes
+            attributes[.font] = converted
+            editor.typingAttributes = attributes
+        }
+        editor.didChangeText()
+    }
+
+    @objc private func applyFontStyle(_ sender: NSPopUpButton) {
+        guard let editor else { return }
+        let font = editor.font ?? NSFont.systemFont(ofSize: 12)
+        let traits: NSFontTraitMask = switch sender.indexOfSelectedItem {
+        case 1: .boldFontMask
+        case 2: .italicFontMask
+        case 3: [.boldFontMask, .italicFontMask]
+        default: []
+        }
+        let converted = NSFontManager.shared.convert(font, toHaveTrait: traits)
+        let range = editor.selectedRange()
+        if range.length > 0 { editor.textStorage?.addAttribute(.font, value: converted, range: range) }
+        else {
+            var attributes = editor.typingAttributes
+            attributes[.font] = converted
+            editor.typingAttributes = attributes
+        }
+        editor.didChangeText()
+    }
+
+    @objc private func applyColor(_ sender: NSColorWell) {
+        guard let editor else { return }
+        let key: NSAttributedString.Key = sender.tag == 0 ? .foregroundColor : .backgroundColor
+        let range = editor.selectedRange()
+        if range.length > 0 { editor.textStorage?.addAttribute(key, value: sender.color, range: range) }
+        else {
+            var attributes = editor.typingAttributes
+            attributes[key] = sender.color
+            editor.typingAttributes = attributes
+        }
+        editor.didChangeText()
+    }
+}

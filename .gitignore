@@ -1,0 +1,4 @@
+.build/
+.swiftpm/
+FreeDEdit.app/
+.DS_Store
