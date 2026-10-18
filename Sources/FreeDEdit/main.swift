@@ -278,6 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         listsItem.submenu = listsMenu
         formatMenu.addItem(listsItem)
         formatMenu.addItem(withTitle: "Wrap to Page", action: #selector(TextDocument.togglePageWrap(_:)), keyEquivalent: "")
+        formatMenu.addItem(withTitle: "Allow Hyphenation", action: #selector(TextDocument.toggleHyphenation(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Prevent Editing", action: #selector(TextDocument.toggleEditingProtection(_:)), keyEquivalent: "")
         main.addItem(formatItem)
         formatItem.submenu = formatMenu
@@ -574,6 +575,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "togglePageWrap:":
                 item.isEnabled = true
                 item.state = (UserDefaults.standard.object(forKey: "WrapToPage") as? Bool ?? false) ? .on : .off
+            case "toggleHyphenation:":
+                item.target = document
+                item.isEnabled = editor.isRichText && editor.isEditable
+                item.state = (editor.layoutManager?.usesDefaultHyphenation ?? false) ? .on : .off
             case "toggleEditingProtection:":
                 item.isEnabled = true
                 item.state = editor.isEditable ? .off : .on
@@ -1295,6 +1300,24 @@ final class TextDocument: NSDocument {
         container.widthTracksTextView = !enabled
         editor.isHorizontallyResizable = !enabled
         scroll.hasHorizontalScroller = !enabled
+    }
+
+    @objc func toggleHyphenation(_ sender: Any?) {
+        guard let editor, editor.isRichText, editor.isEditable,
+              let layoutManager = editor.layoutManager else { return }
+        setHyphenation(!layoutManager.usesDefaultHyphenation)
+    }
+
+    private func setHyphenation(_ enabled: Bool) {
+        guard let editor, let layoutManager = editor.layoutManager,
+              layoutManager.usesDefaultHyphenation != enabled else { return }
+        let previous = layoutManager.usesDefaultHyphenation
+        layoutManager.usesDefaultHyphenation = enabled
+        editor.undoManager?.registerUndo(withTarget: self) { document in
+            document.setHyphenation(previous)
+        }
+        editor.undoManager?.setActionName("Allow Hyphenation")
+        updateChangeCount(.changeDone)
     }
 
     @objc func toggleEditingProtection(_ sender: Any?) {
