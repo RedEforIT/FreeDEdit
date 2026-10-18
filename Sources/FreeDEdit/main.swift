@@ -15,15 +15,14 @@ enum FreeDEditApp {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private weak var recentDocumentsMenu: NSMenu?
+    private weak var launchOpenPanel: NSOpenPanel?
+    private var launchPanelRequestedNewDocument = false
+    private var launchPanelRequestedSettings = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
         DispatchQueue.main.async { [weak self] in
             guard NSDocumentController.shared.documents.isEmpty else { return }
-            do {
-                try self?.createNewDocument()
-            } catch {
-                NSApp.presentError(error)
-            }
+            self?.presentLaunchOpenPanel()
         }
     }
 
@@ -252,7 +251,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @MainActor @objc private func openDocument(_ sender: Any?) {
+        presentOpenPanel(isLaunchPanel: false)
+    }
+
+    @MainActor private func presentLaunchOpenPanel() {
+        presentOpenPanel(isLaunchPanel: true)
+    }
+
+    @MainActor private func presentOpenPanel(isLaunchPanel: Bool) {
         let panel = NSOpenPanel()
+        if isLaunchPanel {
+            launchOpenPanel = panel
+            launchPanelRequestedNewDocument = false
+            launchPanelRequestedSettings = false
+        }
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.allowedContentTypes = TextDocument.openableTypes
@@ -274,9 +286,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ignoreFormatting.state = (UserDefaults.standard.object(forKey: "IgnoreRichText") as? Bool ?? false) ? .on : .off
         accessory.addArrangedSubview(row)
         accessory.addArrangedSubview(ignoreFormatting)
-        accessory.frame = NSRect(x: 0, y: 0, width: 390, height: 62)
+        if isLaunchPanel {
+            let newDocument = NSButton(title: "New Document", target: self,
+                                       action: #selector(newDocumentFromLaunchPanel(_:)))
+            newDocument.bezelStyle = .rounded
+            accessory.addArrangedSubview(newDocument)
+            let settings = NSButton(title: "Settings…", target: self,
+                                    action: #selector(settingsFromLaunchPanel(_:)))
+            settings.bezelStyle = .rounded
+            accessory.addArrangedSubview(settings)
+        }
+        accessory.frame = NSRect(x: 0, y: 0, width: 390, height: isLaunchPanel ? 112 : 62)
         panel.accessoryView = accessory
-        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        if isLaunchPanel { panel.isAccessoryViewDisclosed = true }
+        if isLaunchPanel {
+            panel.begin { [weak self] response in
+                guard let self else { return }
+                self.launchOpenPanel = nil
+                if self.launchPanelRequestedNewDocument {
+                    self.launchPanelRequestedNewDocument = false
+                    do { try self.createNewDocument() }
+                    catch { NSApp.presentError(error) }
+                    return
+                }
+                if self.launchPanelRequestedSettings {
+                    self.launchPanelRequestedSettings = false
+                    self.showSettingsWindow(nil)
+                    return
+                }
+                self.openSelectedDocuments(from: panel, encoding: encoding,
+                                           ignoreFormatting: ignoreFormatting, response: response)
+            }
+        } else {
+            let response = panel.runModal()
+            openSelectedDocuments(from: panel, encoding: encoding,
+                                  ignoreFormatting: ignoreFormatting, response: response)
+        }
+    }
+
+    @MainActor @objc private func newDocumentFromLaunchPanel(_ sender: Any?) {
+        guard let panel = launchOpenPanel else { return }
+        launchPanelRequestedNewDocument = true
+        panel.cancel(nil)
+    }
+
+    @MainActor @objc private func settingsFromLaunchPanel(_ sender: Any?) {
+        guard let panel = launchOpenPanel else { return }
+        launchPanelRequestedSettings = true
+        panel.cancel(nil)
+    }
+
+    @MainActor private func openSelectedDocuments(from panel: NSOpenPanel, encoding: NSPopUpButton,
+                                                  ignoreFormatting: NSButton,
+                                                  response: NSApplication.ModalResponse) {
+        guard response == .OK, !panel.urls.isEmpty else { return }
         let index = encoding.indexOfSelectedItem
         let value = TextDocument.openEncodings.indices.contains(index) ? TextDocument.openEncodings[index].value : 0
         let options = TextDocument.OpenOptions(encoding: String.Encoding(rawValue: value),
