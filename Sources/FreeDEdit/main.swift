@@ -598,6 +598,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "insertTable:":
                 item.target = document
                 item.isEnabled = editor.isRichText && editor.isEditable
+            case "insertAttachment:":
+                item.target = document
+                item.isEnabled = editor.isRichText && editor.isEditable
+            case "insertLink:":
+                item.target = document
+                item.isEnabled = editor.isRichText && editor.isEditable
             case "orderFrontListPanel:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
@@ -1432,7 +1438,7 @@ final class TextDocument: NSDocument {
     }
 
     @objc func insertAttachment(_ sender: Any?) {
-        guard let editor, editor.isRichText else { return }
+        guard let editor, editor.isRichText, editor.isEditable else { return }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
@@ -1452,19 +1458,51 @@ final class TextDocument: NSDocument {
     }
 
     @objc func insertLink(_ sender: Any?) {
-        guard let editor, editor.isRichText else { return }
+        guard let editor, editor.isRichText, editor.isEditable else { return }
         let range = editor.selectedRange()
-        guard range.length > 0 else { NSSound.beep(); return }
         let alert = NSAlert()
         alert.messageText = "Add Link"
+        alert.informativeText = "Enter the address for the link."
         let field = NSTextField(string: "https://")
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
         alert.accessoryView = field
-        alert.addButton(withTitle: "Add")
+        alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn, let url = URL(string: field.stringValue) else { return }
-        editor.textStorage?.addAttribute(.link, value: url, range: range)
-        editor.textStorage?.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+        alert.addButton(withTitle: "Remove Link")
+        let response = alert.runModal()
+        guard response != .alertSecondButtonReturn else { return }
+        if response == .alertThirdButtonReturn {
+            guard let storage = editor.textStorage else { return }
+            var linkRange = range
+            if linkRange.length == 0, storage.length > 0 {
+                let probe = min(linkRange.location == storage.length ? storage.length - 1 : linkRange.location, storage.length - 1)
+                guard storage.attribute(.link, at: probe, effectiveRange: &linkRange) != nil else { return }
+            }
+            guard linkRange.length > 0, NSMaxRange(linkRange) <= storage.length else { return }
+            registerFormattingUndo(in: editor, range: linkRange)
+            storage.removeAttribute(.link, range: linkRange)
+            storage.removeAttribute(.underlineStyle, range: linkRange)
+            editor.undoManager?.setActionName("Remove Link")
+            editor.didChangeText()
+            return
+        }
+        let address = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: address), url.scheme != nil else { NSSound.beep(); return }
+        if range.length > 0 {
+            registerFormattingUndo(in: editor, range: range)
+            editor.textStorage?.addAttribute(.link, value: url, range: range)
+            editor.textStorage?.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+        } else {
+            let visibleText = (url.host?.replacingOccurrences(of: "^www\\.", with: "", options: .regularExpression))
+                .flatMap { $0.isEmpty ? nil : $0 } ?? url.absoluteString
+            let linkedText = NSAttributedString(string: visibleText, attributes: [
+                .link: url,
+                .underlineStyle: NSUnderlineStyle.single.rawValue
+            ])
+            editor.insertText(linkedText, replacementRange: range)
+            editor.setSelectedRange(NSRange(location: range.location + linkedText.length, length: 0))
+        }
+        editor.undoManager?.setActionName("Add Link")
         editor.didChangeText()
     }
 
