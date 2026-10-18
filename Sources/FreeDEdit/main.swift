@@ -169,6 +169,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         fontsItem.target = NSFontManager.shared
         formatMenu.addItem(fontsItem)
         formatMenu.addItem(withTitle: "Show Colors", action: #selector(NSApplication.orderFrontColorPanel(_:)), keyEquivalent: "")
+        formatMenu.addItem(withTitle: "Copy Style", action: #selector(NSText.copyFont(_:)), keyEquivalent: "")
+        formatMenu.addItem(withTitle: "Paste Style", action: #selector(NSText.pasteFont(_:)), keyEquivalent: "")
         if #available(macOS 15.0, *) {
             let highlightItem = NSMenuItem(title: "Highlight", action: nil, keyEquivalent: "")
             let highlightMenu = NSMenu(title: "Highlight")
@@ -475,6 +477,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "applyHighlight:":
                 item.target = document
                 item.isEnabled = editor.isRichText && editor.isEditable && editor.selectedRange().length > 0
+            case "copyFont:":
+                item.target = editor
+                item.isEnabled = editor.isRichText && editor.selectedRange().length > 0
+            case "pasteFont:":
+                item.target = editor
+                item.isEnabled = editor.isRichText && editor.isEditable
             case "toggleRichPlainText:":
                 item.isEnabled = editor.isEditable
                 item.title = editor.isRichText ? "Make Plain Text" : "Make Rich Text"
