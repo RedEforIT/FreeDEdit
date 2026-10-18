@@ -21,6 +21,14 @@ The editor uses the system attributed-string readers and writers for RTF, HTML, 
 
 These paths compile, but still need interactive comparison against TextEdit for exact menu behavior, replacement formatting, document error handling, and HTML whitespace edge cases.
 
+## Printing, recovery, and richer rich text
+
+- Print now creates an `NSPrintOperation` from the active text view with fit-to-page-width and automatic vertical pagination. PDF export uses the same print settings and writes a multipage PDF through a Save panel.
+- The app opts into secure AppKit state restoration. Document windows save their frame, selection, and vertical scroll position; saved documents use `NSDocument` in-place autosaving.
+- Rich-text editing now applies native `NSTextList` bullets or numbering to selected paragraphs, can remove list formatting, creates tables with user-selected dimensions up to 20 by 20, and can attach multiple files in one action. Existing RTFD read/write remains backed by AppKit file wrappers.
+
+These changes compile, but printing/PDF pagination, restoration across relaunch, and RTFD round trips for complex lists/tables/multiple attachments still need end-to-end comparison on macOS.
+
 ## Settings stored by this implementation
 
 The controls use the app's own defaults domain. Values do not modify `com.apple.TextEdit` preferences. A missing value uses the default shown here.
@@ -53,4 +61,4 @@ The controls use the app's own defaults domain. Values do not modify `com.apple.
 
 ## Remaining parity work
 
-This is a working editor, not a 1:1 TextEdit replacement. The current comparison does not cover document versions, restoration of prior windows, TextEdit's first-run and default window states, all menu enablement and shortcuts, exact toolbar customization, exact font and page metrics, all encoding fallback cases, RTFD lists/tables/embedded objects beyond one attachment fixture, malformed-document recovery, printing, or PDF output. DOC/ODT/WordML/web-archive behavior has not been fully measured in the running TextEdit app. Plain-text dimensions are pixel approximations based on character and line counts. The settings UI and menu wording are approximations and the app uses its own preference domain. XHTML output and whitespace preservation still need broad document validation.
+This is a working editor, not a 1:1 TextEdit replacement. The current comparison does not cover document versions, full restoration of prior windows and unsaved documents, TextEdit's first-run and default window states, all menu enablement and shortcuts, exact toolbar customization, exact font and page metrics, all encoding fallback cases, complex RTFD layout fidelity, or malformed-document recovery. Printing, PDF pagination, state restoration, and richer RTFD content have implementation paths but still need end-to-end comparison. DOC/ODT/WordML/web-archive behavior has not been fully measured in the running TextEdit app. Plain-text dimensions are pixel approximations based on character and line counts. The settings UI and menu wording are approximations and the app uses its own preference domain. XHTML output and whitespace preservation still need broad document validation.

@@ -16,14 +16,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private weak var recentDocumentsMenu: NSMenu?
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
-        do {
-            try createNewDocument()
-        } catch {
-            NSApp.presentError(error)
+        DispatchQueue.main.async { [weak self] in
+            guard NSDocumentController.shared.documents.isEmpty else { return }
+            do {
+                try self?.createNewDocument()
+            } catch {
+                NSApp.presentError(error)
+            }
         }
     }
 
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { false }
+    func applicationShouldSaveApplicationState(_ app: NSApplication) -> Bool { true }
+    func applicationShouldRestoreApplicationState(_ app: NSApplication) -> Bool { true }
+    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
 
     @MainActor
     private func installMainMenu() {
@@ -70,10 +76,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         fileMenu.addItem(withTitle: "Rename…", action: #selector(NSDocument.rename(_:)), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Move To…", action: #selector(NSDocument.move(_:)), keyEquivalent: "")
         fileMenu.addItem(withTitle: "Revert to Saved", action: Selector("revertDocumentToSaved:"), keyEquivalent: "")
-        fileMenu.addItem(withTitle: "Export as PDF…", action: #selector(NSDocument.saveToPDF(_:)), keyEquivalent: "")
+        fileMenu.addItem(withTitle: "Export as PDF…", action: #selector(TextDocument.exportPDF(_:)), keyEquivalent: "")
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Page Setup…", action: Selector("runPageLayout:"), keyEquivalent: "")
-        fileMenu.addItem(withTitle: "Print…", action: #selector(NSDocument.printDocument(_:)), keyEquivalent: "p")
+        fileMenu.addItem(withTitle: "Print…", action: #selector(TextDocument.printCurrentDocument(_:)), keyEquivalent: "p")
         main.addItem(fileItem)
         fileItem.submenu = fileMenu
 
@@ -166,6 +172,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         alignment.submenu = alignmentMenu
         formatMenu.addItem(alignment)
+        let listsItem = NSMenuItem(title: "Lists", action: nil, keyEquivalent: "")
+        let listsMenu = NSMenu(title: "Lists")
+        for (title, selector) in [("Bulleted List", #selector(TextDocument.toggleBulletedList(_:))),
+                                  ("Numbered List", #selector(TextDocument.toggleNumberedList(_:))),
+                                  ("Remove List", #selector(TextDocument.removeList(_:)))] {
+            listsMenu.addItem(withTitle: title, action: selector, keyEquivalent: "")
+        }
+        listsItem.submenu = listsMenu
+        formatMenu.addItem(listsItem)
         formatMenu.addItem(withTitle: "Show Paragraph Styles", action: Selector("orderFrontStylesPanel:"), keyEquivalent: "")
         formatMenu.addItem(.separator())
         let rulerItem = NSMenuItem(title: "Show Ruler", action: #selector(TextDocument.toggleRuler(_:)), keyEquivalent: "r")
@@ -571,6 +586,9 @@ final class TextDocument: NSDocument {
     private weak var editor: NSTextView?
     private var isPlainText = (UserDefaults.standard.object(forKey: "DefaultRichText") as? Bool) == false
     private var plainTextEncoding: String.Encoding = .utf8
+    private var restorationID = UUID().uuidString
+    private var restoredSelection: NSRange?
+    private var restoredScrollY: CGFloat?
     var findReplaceEditor: NSTextView? { editor }
 
     struct OpenOptions {
@@ -603,6 +621,10 @@ final class TextDocument: NSDocument {
                               backing: .buffered, defer: false)
         window.center()
         window.title = "Untitled"
+        window.identifier = NSUserInterfaceItemIdentifier("FreeDEdit.DocumentWindow.\(restorationID)")
+        window.setFrameAutosaveName("FreeDEdit.DocumentWindow.\(restorationID)")
+        window.isRestorable = true
+        window.restorationClass = NSDocumentController.self
 
         let scroll = NSScrollView(frame: window.contentView?.bounds ?? .zero)
         scroll.autoresizingMask = [.width, .height]
@@ -660,6 +682,17 @@ final class TextDocument: NSDocument {
         scroll.rulersVisible = view.usesRuler
         let controller = NSWindowController(window: window)
         addWindowController(controller)
+        if let restoredSelection {
+            let location = min(restoredSelection.location, view.string.utf16.count)
+            let length = min(restoredSelection.length, view.string.utf16.count - location)
+            view.setSelectedRange(NSRange(location: location, length: length))
+        }
+        if let restoredScrollY {
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: restoredScrollY))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        restoredSelection = nil
+        restoredScrollY = nil
     }
 
     override func data(ofType typeName: String) throws -> Data {
@@ -814,6 +847,63 @@ final class TextDocument: NSDocument {
                                         documentAttributes: [.documentType: NSAttributedString.DocumentType.rtfd])
     }
 
+    override func encodeRestorableState(with coder: NSCoder) {
+        super.encodeRestorableState(with: coder)
+        coder.encode(restorationID as NSString, forKey: "FreeDEdit.RestorationID")
+        guard let editor else { return }
+        let selection = editor.selectedRange()
+        coder.encode(selection.location, forKey: "FreeDEdit.SelectionLocation")
+        coder.encode(selection.length, forKey: "FreeDEdit.SelectionLength")
+        coder.encode(Double(editor.enclosingScrollView?.contentView.bounds.origin.y ?? 0),
+                     forKey: "FreeDEdit.ScrollPositionY")
+    }
+
+    override func restoreState(with coder: NSCoder) {
+        super.restoreState(with: coder)
+        if let savedID = coder.decodeObject(of: NSString.self, forKey: "FreeDEdit.RestorationID") as String? {
+            restorationID = savedID
+        }
+        guard coder.containsValue(forKey: "FreeDEdit.SelectionLocation") else { return }
+        restoredSelection = NSRange(location: max(0, coder.decodeInteger(forKey: "FreeDEdit.SelectionLocation")),
+                                    length: max(0, coder.decodeInteger(forKey: "FreeDEdit.SelectionLength")))
+        restoredScrollY = CGFloat(coder.decodeDouble(forKey: "FreeDEdit.ScrollPositionY"))
+    }
+
+    private func printSettings() -> NSPrintInfo {
+        let settings = NSPrintInfo.shared.copy() as! NSPrintInfo
+        settings.horizontalPagination = .fit
+        settings.verticalPagination = .automatic
+        settings.isHorizontallyCentered = false
+        settings.isVerticallyCentered = false
+        return settings
+    }
+
+    @objc func printCurrentDocument(_ sender: Any?) {
+        guard let editor else { return }
+        let operation = NSPrintOperation(view: editor, printInfo: printSettings())
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        _ = operation.run()
+    }
+
+    @objc func exportPDF(_ sender: Any?) {
+        guard let editor, let textContainer = editor.textContainer else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.nameFieldStringValue = "\((displayName as String?) ?? "Untitled").pdf"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        editor.layoutManager?.ensureLayout(for: textContainer)
+        let operation = NSPrintOperation.pdfOperation(with: editor, inside: editor.bounds,
+                                                       toPath: url.path, printInfo: printSettings())
+        operation.showsPrintPanel = false
+        operation.showsProgressPanel = true
+        if !operation.run() {
+            NSApp.presentError(NSError(domain: "FreeDEdit", code: 3,
+                                       userInfo: [NSLocalizedDescriptionKey: "PDF export did not complete."]))
+        }
+    }
+
 
     @objc func makePlainText(_ sender: Any?) {
         guard let editor, editor.isRichText else { return }
@@ -863,15 +953,37 @@ final class TextDocument: NSDocument {
 
     @objc func insertTable(_ sender: Any?) {
         guard let editor, editor.isRichText else { return }
+        let dimensions = NSStackView()
+        dimensions.orientation = .vertical
+        dimensions.spacing = 8
+        let rowsField = NSTextField(string: "2")
+        let columnsField = NSTextField(string: "2")
+        let rowsRow = NSStackView(views: [NSTextField(labelWithString: "Rows:"), rowsField])
+        let columnsRow = NSStackView(views: [NSTextField(labelWithString: "Columns:"), columnsField])
+        rowsRow.orientation = .horizontal
+        columnsRow.orientation = .horizontal
+        rowsField.widthAnchor.constraint(equalToConstant: 70).isActive = true
+        columnsField.widthAnchor.constraint(equalToConstant: 70).isActive = true
+        dimensions.addArrangedSubview(rowsRow)
+        dimensions.addArrangedSubview(columnsRow)
+        let alert = NSAlert()
+        alert.messageText = "Insert Table"
+        alert.informativeText = "Choose the number of rows and columns (1–20)."
+        alert.accessoryView = dimensions
+        alert.addButton(withTitle: "Insert")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let rowCount = Int(rowsField.stringValue), (1...20).contains(rowCount),
+              let columnCount = Int(columnsField.stringValue), (1...20).contains(columnCount) else { return }
         let table = NSTextTable()
-        table.numberOfColumns = 2
+        table.numberOfColumns = columnCount
         table.layoutAlgorithm = .automatic
         table.collapsesBorders = true
         let result = NSMutableAttributedString(string: "")
-        for row in 0..<2 {
-            for column in 0..<2 {
+        for row in 0..<rowCount {
+            for column in 0..<columnCount {
                 let block = NSTextTableBlock(table: table, startingRow: row, rowSpan: 1, startingColumn: column, columnSpan: 1)
-                block.setWidth(1, type: .absoluteValueType, for: .border)
+                block.setWidth(0.5, type: .absoluteValueType, for: .border)
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.textBlocks = [block]
                 result.append(NSAttributedString(string: " \n", attributes: [.paragraphStyle: paragraph]))
@@ -883,18 +995,59 @@ final class TextDocument: NSDocument {
         editor.didChangeText()
     }
 
+    @objc func toggleBulletedList(_ sender: Any?) {
+        applyList(markerFormat: .circle)
+    }
+
+    @objc func toggleNumberedList(_ sender: Any?) {
+        applyList(markerFormat: .decimal)
+    }
+
+    @objc func removeList(_ sender: Any?) {
+        applyList(markerFormat: nil)
+    }
+
+    private func applyList(markerFormat: NSTextList.MarkerFormat?) {
+        guard let editor, editor.isRichText, let storage = editor.textStorage else { return }
+        if storage.length == 0 {
+            editor.insertText("\n", replacementRange: NSRange(location: 0, length: 0))
+        }
+        let content = editor.string as NSString
+        let selection = editor.selectedRange()
+        let safeStart = min(selection.location, content.length)
+        let safeEnd = min(max(safeStart, NSMaxRange(selection)), content.length)
+        let finalCharacter = selection.length == 0 ? safeStart : max(safeStart, safeEnd - 1)
+        let start = content.paragraphRange(for: NSRange(location: safeStart, length: 0)).location
+        let end = NSMaxRange(content.paragraphRange(for: NSRange(location: finalCharacter, length: 0)))
+        let list = markerFormat.map { NSTextList(markerFormat: $0, options: 0) }
+        var cursor = start
+        while cursor < end {
+            let paragraphRange = content.paragraphRange(for: NSRange(location: cursor, length: 0))
+            let existing = storage.attribute(.paragraphStyle, at: cursor, effectiveRange: nil) as? NSParagraphStyle
+            let style = (existing?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+            style.textLists = list.map { [$0] } ?? []
+            storage.addAttribute(.paragraphStyle, value: style, range: paragraphRange)
+            cursor = NSMaxRange(paragraphRange)
+        }
+        editor.didChangeText()
+    }
+
     @objc func insertAttachment(_ sender: Any?) {
         guard let editor, editor.isRichText else { return }
         let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        guard panel.runModal() == .OK, let url = panel.url,
-              let wrapper = try? FileWrapper(url: url, options: []) else { return }
-        let attachment = NSTextAttachment(fileWrapper: wrapper)
-        let replacement = NSAttributedString(attachment: attachment)
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        let replacement = NSMutableAttributedString(string: "")
+        for url in panel.urls {
+            guard let wrapper = try? FileWrapper(url: url, options: []) else { continue }
+            if replacement.length > 0 { replacement.append(NSAttributedString(string: "\n")) }
+            replacement.append(NSAttributedString(attachment: NSTextAttachment(fileWrapper: wrapper)))
+        }
+        guard replacement.length > 0 else { return }
         let range = editor.selectedRange()
-        editor.textStorage?.replaceCharacters(in: range, with: replacement)
+        editor.insertText(replacement, replacementRange: range)
         editor.setSelectedRange(NSRange(location: range.location + replacement.length, length: 0))
         editor.didChangeText()
     }
@@ -1150,6 +1303,11 @@ extension TextDocument: NSTextViewDelegate {
         guard let editor else { return }
         text = editor.attributedString()
         updateChangeCount(.changeDone)
+        invalidateRestorableState()
+    }
+
+    func textViewDidChangeSelection(_ notification: Notification) {
+        invalidateRestorableState()
     }
 }
 
