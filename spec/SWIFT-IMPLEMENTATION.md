@@ -2,12 +2,15 @@
 
 `FreeDEdit` is a native AppKit document editor built with `NSDocument`, `NSTextView`, and `NSAttributedString`. It includes File, Edit, Format, View, Window, and Help menus, a formatting toolbar, native find plus a dedicated find-and-replace panel, a two-section Settings window, undo support, and rich/plain conversion. New documents now use the saved rich/plain preference both at launch and from File > New. The Open panel exposes encoding selection, an option to ignore rich-text commands, and multi-selection; the Save panel exposes plain-text encodings.
 
-The editor uses the system attributed-string readers and writers for RTF, HTML, RTFD, Apple web archive, Word 97, Word 2003 XML, Word Open XML, and ODT. Plain text checks a selected encoding first, then BOM-aware Unicode detection, valid UTF-8, Windows-1252 for C1 punctuation, and MacRoman; invalid UTF-8 is used as a final replacement fallback. RTFD uses AppKit file-wrapper APIs and preserves attachment payloads in the verified authored fixture.
+The editor uses the system attributed-string readers and writers for RTF, HTML, RTFD, Apple web archive, Word 97, Word 2003 XML, Word Open XML, and ODT. Plain text checks a selected encoding first, then BOM-aware Unicode detection, valid UTF-8, and MacRoman for unmarked legacy bytes; invalid UTF-8 is used as a final replacement fallback. Windows-1252 remains an explicit encoding choice to avoid guessing incorrectly when its byte stream is ambiguous with MacRoman. RTFD uses AppKit file-wrapper APIs and preserves attachment payloads in the verified authored fixture.
 
 ## Verified behavior
 
 - `swift build` and the production app-bundle build complete. The bundle build now signs the copied executable so macOS code-signature validation allows launch.
 - The app launches as a native macOS document editor. Its formatting toolbar and Open panel controls are visible in Accessibility state.
+- **Interactive macOS check (2026-10-18):** rebuilt and launched the app, opened the RTF and WordML corpus files through the Open panel, and confirmed WordML now opens in the app with its fixture text. In an unsaved RTF session, Bold, Italic, Underline, and Strikethrough toolbar buttons changed the selected text and updated their accessibility state; Undo restored the pre-change formatting for each action. The test edits were discarded and the corpus RTF fixture was restored.
+- **Interactive menu/conversion check:** the rich-text Format menu exposes Bold, Italic, Underline, and alignment actions as enabled with an editable rich-text document active. Make Rich Text/Make Plain Text converted the document and correctly hid/restored the formatting toolbar; plain-text style actions were disabled. Prevent Editing disabled text input and rich-text style actions. The menus still need comparison with TextEdit for exact validation states.
+- **Earlier interactive import checks:** FreeDEdit opened the authored RTF, DOC, DOCX, ODT, HTML, web archive, RTFD, UTF-16LE, and MacRoman fixtures. The MacRoman fixture displayed `café — naïve` after automatic fallback was changed. These checks establish successful opening and basic displayed content only, not full formatting or round-trip parity.
 - AppKit `NSAttributedString` read/write probes succeeded for the authored RTF, HTML, web archive, DOC, DOCX, WordML, and ODT fixtures. These API probes show that the system text engine accepts and emits each document type; they do not establish full app-level fidelity.
 - FreeDEdit opened TextEdit's saved RTFD package, displayed its attachment and surrounding text, and wrote another RTFD package that TextEdit reopened with the same attachment payload.
 - TextEdit opened the authored DOCX fixture in the UI and saved a separate DOCX copy. Extracted text from source and output matched; the output remained DOCX and its serialized bytes differed from the source.
@@ -19,7 +22,7 @@ The editor uses the system attributed-string readers and writers for RTF, HTML, 
 - Open accepts multiple selected files and processes them sequentially so the selected encoding and source-display options apply to each document.
 - When `PreserveWhitespace` is enabled, HTML export encodes repeated, leading, and trailing spaces and tabs in text nodes so browsers retain them. Disable the setting to use the serializer's original whitespace.
 
-These paths compile, but still need interactive comparison against TextEdit for exact menu behavior, replacement formatting, document error handling, and HTML whitespace edge cases.
+These paths compile. The checks above cover toolbar style toggles and their undo, but exact menu behavior, replacement formatting, document error handling, and HTML whitespace edge cases still need interactive comparison against TextEdit.
 
 ## Printing, recovery, and richer rich text
 
@@ -62,7 +65,7 @@ The controls use the app's own defaults domain. Values do not modify `com.apple.
 | `HeightInChars` | Integer | 30 | Approximate initial plain-text window height. |
 | `DefaultPlainFont`, `DefaultPlainSize` | String, integer | Menlo, 11 | Plain-text font and size for new documents. |
 | `DefaultRichFont`, `DefaultRichSize` | String, integer | Helvetica, 12 | Rich-text font and size for new documents. |
-| `PlainTextEncoding` | Integer | Automatic | Preferred encoding for plain-text import; supports Unicode, Western and Central European, Cyrillic, Greek, Turkish, Hebrew, Arabic, Baltic, Vietnamese, Thai, Japanese, Chinese, and Korean encodings. Automatic import checks Unicode BOMs, valid UTF-8, and UTF-16/32 zero-byte patterns, then Windows-1252 for C1 punctuation before MacRoman. |
+| `PlainTextEncoding` | Integer | Automatic | Preferred encoding for plain-text import; supports Unicode, Western and Central European, Cyrillic, Greek, Turkish, Hebrew, Arabic, Baltic, Vietnamese, Thai, Japanese, Chinese, and Korean encodings. Automatic import checks Unicode BOMs, valid UTF-8, and UTF-16/32 zero-byte patterns, then falls back to MacRoman for unmarked legacy bytes. Windows-1252 remains available as an explicit choice because its bytes can be ambiguous with MacRoman. |
 | `PlainTextEncodingForWrite` | Integer | UTF-8 | Encoding selected by default in the plain-text save accessory; uses the same explicit encoding choices as import except Automatic. |
 | `IgnoreRichText`, `IgnoreHTML` | Boolean | false | Opens RTF or HTML source as plain text when enabled. |
 | `AddExtensionToNewPlainTextFiles` | Boolean | true | Adds `.txt` to a plain-text Save As name when it has no extension. |
@@ -87,9 +90,9 @@ FreeDEdit is a working editor, not a 1:1 TextEdit replacement. The items below a
 ### Format and content fidelity
 
 - **RTFD — Compare / Implement:** Round-trip documents containing multiple attachments, lists, tables, links, mixed fonts and colors, and large images. Compare attachment payloads, placement, sizing, wrapping, and surrounding paragraph formatting. Existing checks cover a simple attachment fixture, not complex layouts.
-- **Office and web formats — Compare / Implement:** Compare DOC, DOCX, WordML, ODT, HTML, and Apple web archive imports and exports for text, styles, tables, images, links, metadata, and unsupported features. AppKit accepts several of these types, but acceptance and basic text extraction do not establish TextEdit-level fidelity.
+- **Office and web formats — Compare / Implement:** Compare DOC, DOCX, WordML, ODT, HTML, and Apple web archive imports and exports for text, styles, tables, images, links, metadata, and unsupported features. The WordML corpus fixture now opens through the app's explicit WordML document path; AppKit acceptance and basic text extraction do not establish TextEdit-level fidelity.
 - **Malformed-document recovery — Implement / Compare:** Exercise damaged RTF, RTFD, and HTML files and add recoverable paths for other formats where possible. Current source recovery applies to RTF/RTFD/HTML; it does not restore rich formatting or embedded objects from recovered source.
 - **HTML and XHTML — Compare:** Validate strict/transitional and XHTML output, charset declarations, embedded CSS, whitespace preservation, entities, and browser rendering across representative documents. Current options exist, but broad output validation remains outstanding.
-- **Plain-text encodings — Compare:** Explicit import/export choices cover common Unicode, Windows, and Asian encodings. Compare automatic detection with TextEdit for ambiguous legacy byte streams and verify that unsupported characters produce a clear save error instead of silent substitution or fallback.
+- **Plain-text encodings — Compare:** Explicit import/export choices cover common Unicode, Windows, and Asian encodings. Automatic legacy fallback prefers MacRoman to match the observed MacRoman fixture; Windows-1252 remains explicit because the byte streams overlap. Compare other ambiguous legacy inputs with TextEdit and verify that unsupported characters produce a clear save error instead of silent substitution or fallback.
 
 The settings window and some menu labels remain approximations, and FreeDEdit uses its own preferences domain rather than TextEdit's. Close parity work should be driven by repeatable side-by-side checks on the same fixtures and document states; system-backed format support alone does not establish matching behavior.

@@ -154,6 +154,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let formatItem = NSMenuItem(title: "Format", action: nil, keyEquivalent: "")
         let formatMenu = NSMenu(title: "Format")
+        formatMenu.delegate = self
+        formatMenu.autoenablesItems = false
         let richItem = NSMenuItem(title: "Make Rich Text", action: #selector(TextDocument.makeRichText(_:)), keyEquivalent: "t")
         formatMenu.addItem(richItem)
         let plainItem = NSMenuItem(title: "Make Plain Text", action: #selector(TextDocument.makePlainText(_:)), keyEquivalent: "T")
@@ -169,6 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         formatMenu.addItem(.separator())
         let alignment = NSMenuItem(title: "Text Alignment", action: nil, keyEquivalent: "")
         let alignmentMenu = NSMenu(title: "Text Alignment")
+        alignmentMenu.delegate = self
         for (title, selector) in [("Align Left", "alignLeft:"), ("Center", "alignCenter:"), ("Align Right", "alignRight:"), ("Justify", "alignJustified:")] {
             alignmentMenu.addItem(withTitle: title, action: Selector(selector), keyEquivalent: "")
         }
@@ -176,6 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         formatMenu.addItem(alignment)
         let listsItem = NSMenuItem(title: "Lists", action: nil, keyEquivalent: "")
         let listsMenu = NSMenu(title: "Lists")
+        listsMenu.delegate = self
         for (title, selector) in [("Bulleted List", #selector(TextDocument.toggleBulletedList(_:))),
                                   ("Numbered List", #selector(TextDocument.toggleNumberedList(_:))),
                                   ("Remove List", #selector(TextDocument.removeList(_:)))] {
@@ -190,6 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         formatMenu.addItem(withTitle: "Wrap to Page", action: #selector(TextDocument.togglePageWrap(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Prevent Editing", action: #selector(TextDocument.toggleEditingProtection(_:)), keyEquivalent: "")
         let sizeMenu = NSMenu(title: "Size")
+        sizeMenu.delegate = self
         for (title, tag) in [("Larger", 3), ("Smaller", 4)] {
             let item = NSMenuItem(title: title, action: #selector(NSFontManager.modifyFont(_:)), keyEquivalent: "")
             item.target = NSFontManager.shared
@@ -284,6 +289,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard urls.indices.contains(index) else { completion?(); return }
         let url = urls[index]
         TextDocument.pendingOpenOptions = options
+        if url.pathExtension.lowercased() == "wordml" {
+            do {
+                let document = try NSDocumentController.shared.makeDocument(
+                    withContentsOf: url, ofType: "com.microsoft.word.wordml")
+                TextDocument.pendingOpenOptions = nil
+                NSDocumentController.shared.addDocument(document)
+                document.makeWindowControllers()
+                document.showWindows()
+            } catch {
+                TextDocument.pendingOpenOptions = nil
+                NSApp.presentError(error)
+            }
+            openDocuments(urls, options: options, at: index + 1, completion: completion)
+            return
+        }
         NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
             TextDocument.pendingOpenOptions = nil
             if let error {
@@ -330,23 +350,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @MainActor func menuNeedsUpdate(_ menu: NSMenu) {
-        guard menu === recentDocumentsMenu else { return }
-        menu.removeAllItems()
-        let urls = NSDocumentController.shared.recentDocumentURLs
-        if urls.isEmpty {
-            let item = NSMenuItem(title: "No Recent Documents", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-        } else {
-            for url in urls {
-                let item = NSMenuItem(title: url.lastPathComponent, action: #selector(openRecentDocument(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = url
+        if menu === recentDocumentsMenu {
+            menu.removeAllItems()
+            let urls = NSDocumentController.shared.recentDocumentURLs
+            if urls.isEmpty {
+                let item = NSMenuItem(title: "No Recent Documents", action: nil, keyEquivalent: "")
+                item.isEnabled = false
                 menu.addItem(item)
+            } else {
+                for url in urls {
+                    let item = NSMenuItem(title: url.lastPathComponent, action: #selector(openRecentDocument(_:)), keyEquivalent: "")
+                    item.target = self
+                    item.representedObject = url
+                    menu.addItem(item)
+                }
             }
+            menu.addItem(.separator())
+            menu.addItem(withTitle: "Clear Menu", action: #selector(NSDocumentController.clearRecentDocuments(_:)), keyEquivalent: "")
+            return
         }
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Clear Menu", action: #selector(NSDocumentController.clearRecentDocuments(_:)), keyEquivalent: "")
+        guard let editor = (NSApp.keyWindow?.windowController?.document as? TextDocument)?.menuEditor else { return }
+        let textViewActions: Set<String> = ["toggleBoldface:", "toggleItalics:", "underline:", "alignLeft:",
+                                            "alignCenter:", "alignRight:", "alignJustified:"]
+        menu.autoenablesItems = false
+        for item in menu.items {
+            let action = item.action.map(NSStringFromSelector) ?? ""
+            switch action {
+            case "makeRichText:": item.isEnabled = !editor.isRichText && editor.isEditable
+            case "makePlainText:": item.isEnabled = editor.isRichText && editor.isEditable
+            case "toggleRuler:": item.isEnabled = editor.isRichText
+            case "togglePageWrap:":
+                item.isEnabled = true
+                item.state = (UserDefaults.standard.object(forKey: "WrapToPage") as? Bool ?? false) ? .on : .off
+            case "toggleEditingProtection:":
+                item.isEnabled = true
+                item.state = editor.isEditable ? .off : .on
+            case "toggleBulletedList:", "toggleNumberedList:", "removeList:", "modifyFont:":
+                item.isEnabled = editor.isRichText && editor.isEditable
+            case "orderFrontFontPanel:", "orderFrontColorPanel:", "orderFrontStylesPanel:":
+                item.isEnabled = editor.isRichText && editor.isEditable
+            default:
+                if textViewActions.contains(action) {
+                    item.target = editor
+                    item.isEnabled = editor.isRichText && editor.isEditable
+                }
+            }
+            if let submenu = item.submenu { submenu.delegate = self }
+        }
     }
 
 }
@@ -618,6 +668,7 @@ final class TextDocument: NSDocument {
     private var restoredSelection: NSRange?
     private var restoredScrollY: CGFloat?
     var findReplaceEditor: NSTextView? { editor }
+    var menuEditor: NSTextView? { editor }
 
     struct OpenOptions {
         var encoding: String.Encoding
@@ -734,7 +785,12 @@ final class TextDocument: NSDocument {
         if let documentType = attributedDocumentType(for: typeName) {
             return try editor.attributedString().data(from: range, documentAttributes: [.documentType: documentType])
         }
-        return editor.string.data(using: plainTextEncoding) ?? editor.string.data(using: .utf8) ?? Data()
+        guard let encoded = editor.string.data(using: plainTextEncoding, allowLossyConversion: false) else {
+            let name = Self.encodings.first(where: { $0.value == plainTextEncoding.rawValue })?.name ?? "the selected encoding"
+            throw NSError(domain: "FreeDEdit", code: 5,
+                          userInfo: [NSLocalizedDescriptionKey: "This document contains characters that cannot be saved using \(name). Choose a different encoding and try again."])
+        }
+        return encoded
     }
 
     private func htmlExportData(from value: NSAttributedString, range: NSRange) throws -> Data {
@@ -936,7 +992,7 @@ final class TextDocument: NSDocument {
 
 
     @objc func makePlainText(_ sender: Any?) {
-        guard let editor, editor.isRichText else { return }
+        guard let editor, editor.isRichText, editor.isEditable else { return }
         let plain = editor.string
         editor.isRichText = false
         editor.usesRuler = false
@@ -949,7 +1005,7 @@ final class TextDocument: NSDocument {
     }
 
     @objc func makeRichText(_ sender: Any?) {
-        guard let editor, !editor.isRichText else { return }
+        guard let editor, !editor.isRichText, editor.isEditable else { return }
         editor.isRichText = true
         let showRuler = UserDefaults.standard.object(forKey: "ShowRuler") as? Bool ?? true
         editor.usesRuler = showRuler
@@ -1121,9 +1177,6 @@ final class TextDocument: NSDocument {
             let automatic = Self.detectPlainText(data)
             var candidates = selected == 0 ? [] : [String.Encoding(rawValue: selected)]
             if let automatic { candidates.append(automatic.1) }
-            if data.contains(where: { (0x80...0x9F).contains($0) }) {
-                candidates.append(.windowsCP1252)
-            }
             candidates.append(.macOSRoman)
             var decoded: (String, String.Encoding)?
             for encoding in candidates where decoded == nil {
@@ -1420,10 +1473,12 @@ extension TextDocument: NSTextViewDelegate {
         text = editor.attributedString()
         updateChangeCount(.changeDone)
         invalidateRestorableState()
+        updateFormattingToolbarState()
     }
 
     func textViewDidChangeSelection(_ notification: Notification) {
         invalidateRestorableState()
+        updateFormattingToolbarState()
     }
 }
 
@@ -1584,35 +1639,127 @@ extension TextDocument: NSToolbarDelegate {
     private func formattingButton(_ title: String, tag: Int) -> NSButton {
         let button = NSButton(title: title, target: self, action: #selector(toggleToolbarStyle(_:)))
         button.tag = tag
+        button.setButtonType(.toggle)
         button.bezelStyle = .texturedRounded
         button.frame = NSRect(x: 0, y: 0, width: 34, height: 25)
         return button
+    }
+
+    private func updateFormattingToolbarState() {
+        guard let editor, let toolbar = editor.window?.toolbar else { return }
+        let storage = editor.textStorage
+        let length = storage?.length ?? 0
+        let location = length == 0 ? 0 : min(editor.selectedRange().location, length - 1)
+        let attributes = length > 0 ? storage?.attributes(at: location, effectiveRange: nil) ?? [:] : editor.typingAttributes
+        let font = attributes[.font] as? NSFont ?? editor.font ?? NSFont.systemFont(ofSize: 12)
+        let traits = NSFontManager.shared.traits(of: font)
+        for item in toolbar.items {
+            switch item.itemIdentifier.rawValue {
+            case "bold":
+                (item.view as? NSButton)?.state = traits.contains(.boldFontMask) ? .on : .off
+            case "italic":
+                (item.view as? NSButton)?.state = traits.contains(.italicFontMask) ? .on : .off
+            case "underline":
+                let value = attributes[.underlineStyle] as? Int ?? 0
+                (item.view as? NSButton)?.state = value == 0 ? .off : .on
+            case "strike":
+                let value = attributes[.strikethroughStyle] as? Int ?? 0
+                (item.view as? NSButton)?.state = value == 0 ? .off : .on
+            case "fontFamily":
+                if let popup = item.view as? NSPopUpButton {
+                    popup.selectItem(withTitle: font.familyName ?? font.fontName)
+                }
+            case "fontStyle":
+                let style = traits.contains([.boldFontMask, .italicFontMask]) ? 3
+                    : traits.contains(.boldFontMask) ? 1 : traits.contains(.italicFontMask) ? 2 : 0
+                (item.view as? NSPopUpButton)?.selectItem(at: style)
+            case "fontSize":
+                (item.view as? NSTextField)?.stringValue = String(format: "%.0f", font.pointSize)
+            case "textColor":
+                if let color = attributes[.foregroundColor] as? NSColor { (item.view as? NSColorWell)?.color = color }
+            case "textBackground":
+                if let color = attributes[.backgroundColor] as? NSColor { (item.view as? NSColorWell)?.color = color }
+            case "alignment":
+                let style = attributes[.paragraphStyle] as? NSParagraphStyle
+                let index: Int = switch style?.alignment ?? .left {
+                case .center: 1
+                case .right: 2
+                case .justified: 3
+                default: 0
+                }
+                (item.view as? NSPopUpButton)?.selectItem(at: index)
+            case "listStyle":
+                let style = attributes[.paragraphStyle] as? NSParagraphStyle
+                let marker = style?.textLists.first?.markerFormat
+                let index = marker == .circle ? 1 : (marker == .decimal ? 2 : 0)
+                (item.view as? NSPopUpButton)?.selectItem(at: index)
+            case "lineSpacing":
+                let spacing = (attributes[.paragraphStyle] as? NSParagraphStyle)?.lineSpacing ?? 0
+                let index = spacing >= font.pointSize * 0.75 ? 2 : (spacing > 0 ? 1 : 0)
+                (item.view as? NSPopUpButton)?.selectItem(at: index)
+            default:
+                break
+            }
+        }
+    }
+
+    private func registerFormattingUndo(in editor: NSTextView, range: NSRange) {
+        guard range.length > 0, let storage = editor.textStorage,
+              NSMaxRange(range) <= storage.length else { return }
+        let previous = NSAttributedString(attributedString: storage.attributedSubstring(from: range))
+        editor.undoManager?.registerUndo(withTarget: editor) { target in
+            Self.restoreFormatting(previous, in: range, editor: target)
+        }
+        editor.undoManager?.setActionName("Format")
+    }
+
+    private static func restoreFormatting(_ value: NSAttributedString, in range: NSRange, editor: NSTextView) {
+        guard let storage = editor.textStorage, NSMaxRange(range) <= storage.length else { return }
+        let current = NSAttributedString(attributedString: storage.attributedSubstring(from: range))
+        editor.undoManager?.registerUndo(withTarget: editor) { target in
+            Self.restoreFormatting(current, in: range, editor: target)
+        }
+        storage.replaceCharacters(in: range, with: value)
+        editor.didChangeText()
     }
 
     @objc private func toggleToolbarStyle(_ sender: NSButton) {
         guard let editor else { return }
         let range = editor.selectedRange()
         let storage = editor.textStorage
-        let currentFont = editor.font ?? NSFont.systemFont(ofSize: 12)
+        registerFormattingUndo(in: editor, range: range)
         if sender.tag == 3 || sender.tag == 4 {
-            var attributes = editor.typingAttributes
             let key: NSAttributedString.Key = sender.tag == 3 ? .underlineStyle : .strikethroughStyle
-            let value = (attributes[key] as? Int ?? 0) == 0 ? NSUnderlineStyle.single.rawValue : 0
+            let existing = editor.typingAttributes[key] as? Int ?? 0
+            let value = existing == 0 ? NSUnderlineStyle.single.rawValue : 0
+            if range.length > 0 {
+                let runValue = storage?.attribute(key, at: range.location, effectiveRange: nil) as? Int ?? existing
+                storage?.addAttribute(key, value: runValue == 0 ? NSUnderlineStyle.single.rawValue : 0, range: range)
+            }
+            var attributes = editor.typingAttributes
             attributes[key] = value
             editor.typingAttributes = attributes
-            if range.length > 0 { storage?.addAttribute(key, value: value, range: range) }
         } else {
             let trait = sender.tag == 1 ? NSFontTraitMask.boldFontMask : NSFontTraitMask.italicFontMask
-            let converted = NSFontManager.shared.convert(currentFont, toHaveTrait: trait)
             if range.length > 0 {
-                editor.textStorage?.addAttribute(.font, value: converted, range: range)
+                storage?.enumerateAttribute(.font, in: range, options: []) { value, subrange, _ in
+                    let current = value as? NSFont ?? editor.font ?? NSFont.systemFont(ofSize: 12)
+                    let traits = NSFontManager.shared.traits(of: current)
+                    let desired = traits.contains(trait) ? traits.subtracting(trait) : traits.union(trait)
+                    let converted = NSFontManager.shared.convert(current, toHaveTrait: desired)
+                    storage?.addAttribute(.font, value: converted, range: subrange)
+                }
             } else {
                 var attributes = editor.typingAttributes
-                attributes[.font] = converted
+                let current = attributes[.font] as? NSFont ?? editor.font ?? NSFont.systemFont(ofSize: 12)
+                let traits = NSFontManager.shared.traits(of: current)
+                let desired = traits.contains(trait) ? traits.subtracting(trait) : traits.union(trait)
+                attributes[.font] = NSFontManager.shared.convert(current, toHaveTrait: desired)
                 editor.typingAttributes = attributes
             }
         }
         editor.didChangeText()
+        updateFormattingToolbarState()
     }
 
     @objc private func applyFontSize(_ sender: NSTextField) {
@@ -1620,6 +1767,7 @@ extension TextDocument: NSToolbarDelegate {
         let font = editor.font ?? NSFont.systemFont(ofSize: size)
         let sizedFont = NSFont(descriptor: font.fontDescriptor, size: size) ?? NSFont.systemFont(ofSize: size)
         let range = editor.selectedRange()
+        registerFormattingUndo(in: editor, range: range)
         if range.length > 0 {
             editor.textStorage?.enumerateAttribute(.font, in: range, options: []) { value, subrange, _ in
                 let existing = value as? NSFont ?? font
@@ -1637,6 +1785,7 @@ extension TextDocument: NSToolbarDelegate {
     @objc private func applyFontFamily(_ sender: NSPopUpButton) {
         guard let editor, let family = sender.titleOfSelectedItem else { return }
         let range = editor.selectedRange()
+        registerFormattingUndo(in: editor, range: range)
         let currentFont = editor.font ?? NSFont.systemFont(ofSize: 12)
         let converted = NSFontManager.shared.convert(currentFont, toFamily: family)
         if range.length > 0 { editor.textStorage?.addAttribute(.font, value: converted, range: range) }
@@ -1659,6 +1808,7 @@ extension TextDocument: NSToolbarDelegate {
         }
         let converted = NSFontManager.shared.convert(font, toHaveTrait: traits)
         let range = editor.selectedRange()
+        registerFormattingUndo(in: editor, range: range)
         if range.length > 0 { editor.textStorage?.addAttribute(.font, value: converted, range: range) }
         else {
             var attributes = editor.typingAttributes
@@ -1672,6 +1822,7 @@ extension TextDocument: NSToolbarDelegate {
         guard let editor else { return }
         let key: NSAttributedString.Key = sender.tag == 0 ? .foregroundColor : .backgroundColor
         let range = editor.selectedRange()
+        registerFormattingUndo(in: editor, range: range)
         if range.length > 0 { editor.textStorage?.addAttribute(key, value: sender.color, range: range) }
         else {
             var attributes = editor.typingAttributes

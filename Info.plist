@@ -60,5 +60,19 @@
             </array>
         </dict>
     </array>
+    <key>UTImportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key><string>com.microsoft.word.wordml</string>
+            <key>UTTypeDescription</key><string>Microsoft Word 2003 XML Document</string>
+            <key>UTTypeConformsTo</key>
+            <array><string>public.xml</string><string>public.text</string></array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array><string>wordml</string></array>
+            </dict>
+        </dict>
+    </array>
 </dict>
 </plist>
