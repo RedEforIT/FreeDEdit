@@ -1,6 +1,6 @@
 # Swift implementation behavior and current coverage
 
-`FreeDEdit` is a native AppKit document editor built with `NSDocument`, `NSTextView`, and `NSAttributedString`. It includes File, Edit, Format, View, Window, and Help menus, a formatting toolbar, native find and replace panels, a two-section Settings window, undo support, and rich/plain conversion. New documents now use the saved rich/plain preference both at launch and from File > New. The Open panel exposes encoding selection and an option to ignore rich-text commands; the Save panel exposes plain-text encodings.
+`FreeDEdit` is a native AppKit document editor built with `NSDocument`, `NSTextView`, and `NSAttributedString`. It includes File, Edit, Format, View, Window, and Help menus, a formatting toolbar, native find plus a dedicated find-and-replace panel, a two-section Settings window, undo support, and rich/plain conversion. New documents now use the saved rich/plain preference both at launch and from File > New. The Open panel exposes encoding selection, an option to ignore rich-text commands, and multi-selection; the Save panel exposes plain-text encodings.
 
 The editor uses the system attributed-string readers and writers for RTF, HTML, RTFD, Apple web archive, Word 97, Word 2003 XML, Word Open XML, and ODT. Plain text checks a selected encoding first, then UTF-8, UTF-16 variants, and MacRoman; invalid UTF-8 is used as a final replacement fallback. RTFD uses AppKit file-wrapper APIs and preserves attachment payloads in the verified authored fixture.
 
@@ -12,6 +12,14 @@ The editor uses the system attributed-string readers and writers for RTF, HTML, 
 - FreeDEdit opened TextEdit's saved RTFD package, displayed its attachment and surrounding text, and wrote another RTFD package that TextEdit reopened with the same attachment payload.
 - TextEdit opened the authored DOCX fixture in the UI and saved a separate DOCX copy. Extracted text from source and output matched; the output remained DOCX and its serialized bytes differed from the source.
 - TextEdit's scripted differential run can save ordinary RTF, HTML, and plain-text fixtures. App Sandbox access prompts prevent the unattended script from opening RTFD and some office/web-archive inputs; those need UI-driven file selection.
+
+## Newly implemented paths
+
+- Find and Replace has its own panel with forward/backward search, optional case matching, single replacement, and grouped Replace All undo.
+- Open accepts multiple selected files and processes them sequentially so the selected encoding and source-display options apply to each document.
+- When `PreserveWhitespace` is enabled, HTML export encodes repeated, leading, and trailing spaces and tabs in text nodes so browsers retain them. Disable the setting to use the serializer's original whitespace.
+
+These paths compile, but still need interactive comparison against TextEdit for exact menu behavior, replacement formatting, document error handling, and HTML whitespace edge cases.
 
 ## Settings stored by this implementation
 
@@ -39,10 +47,10 @@ The controls use the app's own defaults domain. Values do not modify `com.apple.
 | `PlainTextEncodingForWrite` | Integer | UTF-8 | Encoding selected by default in the plain-text save accessory. |
 | `IgnoreRichText`, `IgnoreHTML` | Boolean | false | Opens RTF or HTML source as plain text when enabled. |
 | `AddExtensionToNewPlainTextFiles` | Boolean | true | Adds `.txt` to a plain-text Save As name when it has no extension. |
-| `PreserveWhitespace` | Boolean | true | Displayed in Settings; its export effect is not implemented yet. |
+| `PreserveWhitespace` | Boolean | true | Preserves repeated, leading, and trailing spaces and tabs in HTML text during export. |
 | `UseTransitionalDocType`, `UseXHTMLDocType` | Boolean | false / false | Selects HTML 4.01 Strict, HTML 4.01 Transitional, XHTML 1.0 Strict, or XHTML 1.0 Transitional output. |
 | `HTMLExportEncoding` | String | Unicode (UTF-8) | Sets the encoding used for HTML output. |
 
 ## Remaining parity work
 
-This is a working editor, not a 1:1 TextEdit replacement. The current comparison does not cover document versions, restoration of prior windows, TextEdit's first-run and default window states, all menu enablement and shortcuts, exact toolbar customization, exact font and page metrics, all encoding fallback cases, RTFD lists/tables/embedded objects beyond one attachment fixture, malformed-document recovery, printing, PDF output, or HTML export option effects. DOC/ODT/WordML/web-archive behavior has not been fully measured in the running TextEdit app. Plain-text dimensions are pixel approximations based on character and line counts. The settings UI and menu wording are approximations and the app uses its own preference domain. XHTML output still needs broad document validation; only the generated doctype, namespace, and void-element serialization paths have been implemented.
+This is a working editor, not a 1:1 TextEdit replacement. The current comparison does not cover document versions, restoration of prior windows, TextEdit's first-run and default window states, all menu enablement and shortcuts, exact toolbar customization, exact font and page metrics, all encoding fallback cases, RTFD lists/tables/embedded objects beyond one attachment fixture, malformed-document recovery, printing, or PDF output. DOC/ODT/WordML/web-archive behavior has not been fully measured in the running TextEdit app. Plain-text dimensions are pixel approximations based on character and line counts. The settings UI and menu wording are approximations and the app uses its own preference domain. XHTML output and whitespace preservation still need broad document validation.

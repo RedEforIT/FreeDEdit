@@ -102,12 +102,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         editMenu.addItem(withTitle: "Add Link…", action: #selector(TextDocument.insertLink(_:)), keyEquivalent: "k")
         let findItem = NSMenuItem(title: "Find", action: nil, keyEquivalent: "")
         let findMenu = NSMenu(title: "Find")
-        for (title, action, key, tag) in [("Find…", "performFindPanelAction:", "f", NSFindPanelAction.showFindPanel.rawValue), ("Find and Replace…", "performFindPanelAction:", "", NSFindPanelAction.showFindPanel.rawValue), ("Find Next", "performFindPanelAction:", "g", NSFindPanelAction.next.rawValue), ("Find Previous", "performFindPanelAction:", "G", NSFindPanelAction.previous.rawValue), ("Use Selection for Find", "performFindPanelAction:", "e", NSFindPanelAction.setFindString.rawValue), ("Jump to Selection", "centerSelectionInVisibleArea:", "j", 0), ("Select Paragraph", "selectParagraph:", "", 0)] {
+        for (title, action, key, tag) in [("Find…", "performFindPanelAction:", "f", NSFindPanelAction.showFindPanel.rawValue), ("Find Next", "performFindPanelAction:", "g", NSFindPanelAction.next.rawValue), ("Find Previous", "performFindPanelAction:", "G", NSFindPanelAction.previous.rawValue), ("Use Selection for Find", "performFindPanelAction:", "e", NSFindPanelAction.setFindString.rawValue), ("Jump to Selection", "centerSelectionInVisibleArea:", "j", 0), ("Select Paragraph", "selectParagraph:", "", 0)] {
             let item = NSMenuItem(title: title, action: Selector(action), keyEquivalent: key)
             item.tag = Int(tag)
             findMenu.addItem(item)
         }
         findItem.submenu = findMenu
+        let replaceItem = NSMenuItem(title: "Find and Replace…", action: #selector(showFindReplace(_:)), keyEquivalent: "")
+        replaceItem.target = self
+        editMenu.addItem(replaceItem)
         editMenu.addItem(.separator())
         editMenu.addItem(findItem)
         let spellingItem = NSMenuItem(title: "Spelling and Grammar", action: nil, keyEquivalent: "")
@@ -228,7 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @MainActor @objc private func openDocument(_ sender: Any?) {
         let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
+        panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.allowedContentTypes = TextDocument.openableTypes
         let accessory = NSStackView()
@@ -251,15 +254,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         accessory.addArrangedSubview(ignoreFormatting)
         accessory.frame = NSRect(x: 0, y: 0, width: 390, height: 62)
         panel.accessoryView = accessory
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
         let index = encoding.indexOfSelectedItem
         let value = TextDocument.openEncodings.indices.contains(index) ? TextDocument.openEncodings[index].value : 0
-        TextDocument.pendingOpenOptions = .init(encoding: String.Encoding(rawValue: value),
-                                                 ignoreRichText: ignoreFormatting.state == .on)
-        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { _, _, error in
+        let options = TextDocument.OpenOptions(encoding: String.Encoding(rawValue: value),
+                                               ignoreRichText: ignoreFormatting.state == .on)
+        openDocuments(panel.urls, options: options, at: 0)
+    }
+
+    @MainActor private func openDocuments(_ urls: [URL], options: TextDocument.OpenOptions, at index: Int) {
+        guard urls.indices.contains(index) else { return }
+        TextDocument.pendingOpenOptions = options
+        NSDocumentController.shared.openDocument(withContentsOf: urls[index], display: true) { _, _, error in
             TextDocument.pendingOpenOptions = nil
             if let error { NSApp.presentError(error) }
+            self.openDocuments(urls, options: options, at: index + 1)
         }
+    }
+
+    @MainActor @objc private func showFindReplace(_ sender: Any?) {
+        guard let document = NSApp.keyWindow?.windowController?.document as? TextDocument else { return }
+        FindReplaceWindowController.shared.show(for: document)
     }
 
     @MainActor @objc private func undo(_ sender: Any?) { NSApp.keyWindow?.undoManager?.undo() }
@@ -556,6 +571,7 @@ final class TextDocument: NSDocument {
     private weak var editor: NSTextView?
     private var isPlainText = (UserDefaults.standard.object(forKey: "DefaultRichText") as? Bool) == false
     private var plainTextEncoding: String.Encoding = .utf8
+    var findReplaceEditor: NSTextView? { editor }
 
     struct OpenOptions {
         var encoding: String.Encoding
@@ -696,7 +712,67 @@ final class TextDocument: NSDocument {
                 html = html.replacingOccurrences(of: expression, with: replacement, options: .regularExpression)
             }
         }
+        if UserDefaults.standard.object(forKey: "PreserveWhitespace") as? Bool ?? true {
+            html = preservingTextWhitespace(in: html)
+        }
         return html.data(using: encoding) ?? data
+    }
+
+    private func preservingTextWhitespace(in html: String) -> String {
+        var result = ""
+        var textNode = ""
+        var insideTag = false
+
+        func encodedText(_ text: String) -> String {
+            let characters = Array(text)
+            guard !characters.allSatisfy(\.isWhitespace) else { return text }
+            var output = ""
+            var index = 0
+            while index < characters.count {
+                let character = characters[index]
+                if character == "\t" {
+                    var end = index + 1
+                    while end < characters.count && characters[end] == "\t" { end += 1 }
+                    output += String(repeating: "&#160;", count: (end - index) * 4)
+                    index = end
+                    continue
+                }
+                guard character == " " else {
+                    output.append(character)
+                    index += 1
+                    continue
+                }
+                var end = index + 1
+                while end < characters.count && characters[end] == " " { end += 1 }
+                let count = end - index
+                let atTextEdge = index == 0 || end == characters.count
+                if atTextEdge {
+                    output += String(repeating: "&#160;", count: count)
+                } else {
+                    output += " " + String(repeating: "&#160;", count: count - 1)
+                }
+                index = end
+            }
+            return output
+        }
+
+        for character in html {
+            if character == "<" && !insideTag {
+                result += encodedText(textNode)
+                textNode = ""
+                insideTag = true
+                result.append(character)
+            } else if character == ">" && insideTag {
+                insideTag = false
+                result.append(character)
+            } else if insideTag {
+                result.append(character)
+            } else {
+                textNode.append(character)
+            }
+        }
+        result += encodedText(textNode)
+        return result
     }
 
     override func prepareSavePanel(_ savePanel: NSSavePanel) -> Bool {
@@ -911,6 +987,161 @@ final class TextDocument: NSDocument {
     override func windowControllerDidLoadNib(_ windowController: NSWindowController) {
         super.windowControllerDidLoadNib(windowController)
         editor?.textStorage?.setAttributedString(text)
+    }
+}
+
+@MainActor
+final class FindReplaceWindowController: NSWindowController {
+    static let shared = FindReplaceWindowController()
+
+    private weak var targetDocument: TextDocument?
+    private let findField = NSTextField(string: "")
+    private let replaceField = NSTextField(string: "")
+    private let caseSensitive = NSButton(checkboxWithTitle: "Match case", target: nil, action: nil)
+    private let status = NSTextField(labelWithString: "")
+
+    private init() {
+        let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 440, height: 190),
+                             styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.title = "Find and Replace"
+        window.isReleasedWhenClosed = false
+        super.init(window: window)
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        for (label, field) in [("Find:", findField), ("Replace with:", replaceField)] {
+            let row = NSStackView()
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 10
+            let title = NSTextField(labelWithString: label)
+            title.widthAnchor.constraint(equalToConstant: 100).isActive = true
+            field.widthAnchor.constraint(equalToConstant: 290).isActive = true
+            row.addArrangedSubview(title)
+            row.addArrangedSubview(field)
+            stack.addArrangedSubview(row)
+        }
+
+        let options = NSStackView(views: [caseSensitive, status])
+        options.orientation = .horizontal
+        options.alignment = .centerY
+        options.spacing = 16
+        stack.addArrangedSubview(options)
+
+        let buttons = NSStackView()
+        buttons.orientation = .horizontal
+        buttons.alignment = .centerY
+        buttons.spacing = 8
+        for (title, action) in [("Previous", #selector(findPrevious(_:))), ("Next", #selector(findNext(_:))),
+                                ("Replace", #selector(replace(_:))), ("Replace All", #selector(replaceAll(_:)))] {
+            let button = NSButton(title: title, target: self, action: action)
+            button.bezelStyle = .rounded
+            buttons.addArrangedSubview(button)
+        }
+        stack.addArrangedSubview(buttons)
+
+        window.contentView?.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor, constant: 18),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: window.contentView!.trailingAnchor, constant: -18),
+            stack.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: 16)
+        ])
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    func show(for document: TextDocument) {
+        self.targetDocument = document
+        if let editor = document.findReplaceEditor, editor.selectedRange().length > 0 {
+            findField.stringValue = (editor.string as NSString).substring(with: editor.selectedRange())
+        }
+        status.stringValue = ""
+        showWindow(nil)
+        window?.center()
+        window?.makeKeyAndOrderFront(nil)
+        findField.selectText(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func findNext(_ sender: Any?) { _ = find(backwards: false) }
+    @objc private func findPrevious(_ sender: Any?) { _ = find(backwards: true) }
+
+    private func find(backwards: Bool) -> NSRange? {
+        guard let editor = targetDocument?.findReplaceEditor else { return nil }
+        let query = findField.stringValue
+        guard !query.isEmpty else { NSSound.beep(); return nil }
+        let content = editor.string as NSString
+        let selected = editor.selectedRange()
+        let options: NSString.CompareOptions = caseSensitive.state == .on ? [] : [.caseInsensitive]
+        let start = min(NSMaxRange(selected), content.length)
+        let found: NSRange
+        if backwards {
+            let before = NSRange(location: 0, length: min(selected.location, content.length))
+            let after = NSRange(location: min(selected.location, content.length),
+                                length: content.length - min(selected.location, content.length))
+            let first = content.range(of: query, options: options.union(.backwards), range: before)
+            found = first.location != NSNotFound ? first : content.range(of: query, options: options.union(.backwards), range: after)
+        } else {
+            let after = NSRange(location: start, length: content.length - start)
+            let before = NSRange(location: 0, length: start)
+            let first = content.range(of: query, options: options, range: after)
+            found = first.location != NSNotFound ? first : content.range(of: query, options: options, range: before)
+        }
+        guard found.location != NSNotFound else {
+            status.stringValue = "Not found"
+            NSSound.beep()
+            return nil
+        }
+        editor.setSelectedRange(found)
+        editor.scrollRangeToVisible(found)
+        status.stringValue = ""
+        return found
+    }
+
+    @objc private func replace(_ sender: Any?) {
+        guard let editor = targetDocument?.findReplaceEditor else { return }
+        let query = findField.stringValue
+        guard !query.isEmpty else { NSSound.beep(); return }
+        let selected = editor.selectedRange()
+        let selectedText = (editor.string as NSString).substring(with: selected)
+        let comparison: String.CompareOptions = caseSensitive.state == .on ? [] : [.caseInsensitive]
+        if selected.length > 0, selectedText.compare(query, options: comparison) == .orderedSame {
+            editor.insertText(replaceField.stringValue, replacementRange: selected)
+            status.stringValue = "Replaced 1 occurrence"
+        }
+        _ = find(backwards: false)
+    }
+
+    @objc private func replaceAll(_ sender: Any?) {
+        guard let editor = targetDocument?.findReplaceEditor else { return }
+        let query = findField.stringValue
+        guard !query.isEmpty else { NSSound.beep(); return }
+        let content = editor.string as NSString
+        let searchOptions: NSString.CompareOptions = caseSensitive.state == .on ? [] : [.caseInsensitive]
+        var matches: [NSRange] = []
+        var location = 0
+        while location < content.length {
+            let range = content.range(of: query, options: searchOptions,
+                                      range: NSRange(location: location, length: content.length - location))
+            guard range.location != NSNotFound, range.length > 0 else { break }
+            matches.append(range)
+            location = NSMaxRange(range)
+        }
+        guard !matches.isEmpty else {
+            status.stringValue = "Not found"
+            NSSound.beep()
+            return
+        }
+        editor.undoManager?.beginUndoGrouping()
+        for range in matches.reversed() {
+            editor.insertText(replaceField.stringValue, replacementRange: range)
+        }
+        editor.undoManager?.endUndoGrouping()
+        status.stringValue = "Replaced \(matches.count) occurrence\(matches.count == 1 ? "" : "s")"
     }
 }
 
