@@ -707,6 +707,7 @@ final class TextDocument: NSDocument {
         let toolbar = NSToolbar(identifier: "FreeDEditFormatting")
         toolbar.delegate = self
         toolbar.displayMode = .iconAndLabel
+        toolbar.isVisible = !isPlainText
         window.toolbar = toolbar
         scroll.rulersVisible = view.usesRuler
         let controller = NSWindowController(window: window)
@@ -940,6 +941,7 @@ final class TextDocument: NSDocument {
         editor.isRichText = false
         editor.usesRuler = false
         editor.enclosingScrollView?.rulersVisible = false
+        editor.window?.toolbar?.isVisible = false
         editor.string = plain
         text = NSAttributedString(string: plain)
         isPlainText = true
@@ -952,6 +954,7 @@ final class TextDocument: NSDocument {
         let showRuler = UserDefaults.standard.object(forKey: "ShowRuler") as? Bool ?? true
         editor.usesRuler = showRuler
         editor.enclosingScrollView?.rulersVisible = showRuler
+        editor.window?.toolbar?.isVisible = true
         isPlainText = false
         text = editor.attributedString()
         updateChangeCount(.changeDone)
@@ -1427,11 +1430,12 @@ extension TextDocument: NSTextViewDelegate {
 extension TextDocument: NSToolbarDelegate {
     private var toolbarIDs: [NSToolbarItem.Identifier] {
         [.init("bold"), .init("italic"), .init("underline"), .init("strike"), .flexibleSpace,
-         .init("fontFamily"), .init("fontStyle"), .init("fontSize"), .init("textColor"), .init("textBackground")]
+         .init("fontFamily"), .init("fontStyle"), .init("fontSize"), .init("textColor"), .init("textBackground"),
+         .flexibleSpace, .init("alignment"), .init("listStyle"), .init("lineSpacing")]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        toolbarIDs + [.flexibleSpace]
+        toolbarIDs
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -1491,9 +1495,90 @@ extension TextDocument: NSToolbarDelegate {
             colorWell.action = #selector(applyColor(_:))
             colorWell.tag = 1
             item.view = colorWell
+        case "alignment":
+            item.label = "Alignment"
+            let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 120, height: 26), pullsDown: false)
+            popup.addItems(withTitles: ["Left", "Center", "Right", "Justified"])
+            popup.target = self
+            popup.action = #selector(applyAlignment(_:))
+            item.view = popup
+        case "listStyle":
+            item.label = "List Style"
+            let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 130, height: 26), pullsDown: false)
+            popup.addItems(withTitles: ["No List", "Bulleted", "Numbered"])
+            popup.target = self
+            popup.action = #selector(applyToolbarList(_:))
+            item.view = popup
+        case "lineSpacing":
+            item.label = "Line Spacing"
+            let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 130, height: 26), pullsDown: false)
+            popup.addItems(withTitles: ["Single", "1.5 Lines", "Double"])
+            popup.target = self
+            popup.action = #selector(applyLineSpacing(_:))
+            item.view = popup
         default: return nil
         }
         return item
+    }
+
+    @objc private func applyAlignment(_ sender: NSPopUpButton) {
+        guard let editor, editor.isRichText else { return }
+        let alignment: NSTextAlignment = switch sender.indexOfSelectedItem {
+        case 1: .center
+        case 2: .right
+        case 3: .justified
+        default: .left
+        }
+        let range = editor.selectedRange()
+        let length = editor.textStorage?.length ?? 0
+        let paragraphRange = length == 0 ? NSRange(location: 0, length: 0) :
+            (editor.string as NSString).paragraphRange(for: NSRange(location: min(range.location, length), length: min(range.length, length - min(range.location, length))))
+        let existing = editor.typingAttributes[.paragraphStyle] as? NSParagraphStyle ?? NSParagraphStyle.default
+        let mutable = existing.mutableCopy() as? NSMutableParagraphStyle ?? NSMutableParagraphStyle()
+        mutable.alignment = alignment
+        if paragraphRange.length > 0 { editor.textStorage?.addAttribute(.paragraphStyle, value: mutable, range: paragraphRange) }
+        var attributes = editor.typingAttributes
+        attributes[.paragraphStyle] = mutable
+        editor.typingAttributes = attributes
+        editor.didChangeText()
+    }
+
+    @objc private func applyToolbarList(_ sender: NSPopUpButton) {
+        switch sender.indexOfSelectedItem {
+        case 1: toggleBulletedList(sender)
+        case 2: toggleNumberedList(sender)
+        default: removeList(sender)
+        }
+    }
+
+    @objc private func applyLineSpacing(_ sender: NSPopUpButton) {
+        guard let editor, editor.isRichText else { return }
+        let multiplier: CGFloat = switch sender.indexOfSelectedItem {
+        case 1: 0.5
+        case 2: 1
+        default: 0
+        }
+        let range = editor.selectedRange()
+        let length = editor.textStorage?.length ?? 0
+        if length > 0 {
+            let start = min(range.location, length)
+            let span = range.length > 0 ? min(range.length, length - start) : 0
+            let paragraphRange = (editor.string as NSString).paragraphRange(for: NSRange(location: start, length: span))
+            let existing = editor.textStorage?.attribute(.paragraphStyle, at: paragraphRange.location, effectiveRange: nil) as? NSParagraphStyle
+            let style = (existing?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+            style.lineSpacing = (editor.font?.pointSize ?? 12) * multiplier
+            editor.textStorage?.addAttribute(.paragraphStyle, value: style, range: paragraphRange)
+            var attributes = editor.typingAttributes
+            attributes[.paragraphStyle] = style
+            editor.typingAttributes = attributes
+        } else {
+            let style = (editor.typingAttributes[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle ?? NSMutableParagraphStyle()
+            style.lineSpacing = (editor.font?.pointSize ?? 12) * multiplier
+            var attributes = editor.typingAttributes
+            attributes[.paragraphStyle] = style
+            editor.typingAttributes = attributes
+        }
+        editor.didChangeText()
     }
 
     private func formattingButton(_ title: String, tag: Int) -> NSButton {
