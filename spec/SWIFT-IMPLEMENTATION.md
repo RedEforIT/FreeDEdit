@@ -108,9 +108,9 @@ The controls use the app's own defaults domain. Values do not modify `com.apple.
 | `UseTransitionalDocType`, `UseXHTMLDocType` | Boolean | false / false | Selects HTML 4.01 Strict, HTML 4.01 Transitional, XHTML 1.0 Strict, or XHTML 1.0 Transitional output. |
 | `HTMLExportEncoding` | String | Unicode (UTF-8) | Sets the encoding used for HTML output. |
 
-## Remaining parity work
+## Known differences and documentation to-do
 
-FreeDEdit is a working editor, not a 1:1 TextEdit replacement. The items below are the remaining gaps based on the current implementation and observations. “Compare” means the feature exists but its behavior has not been checked closely enough against TextEdit; “Implement” means additional behavior is still needed.
+FreeDEdit is a working editor and is not intended to be a 1:1 TextEdit replacement. The items below are behaviors that have not been checked closely against TextEdit. They are treated as documentation to update: for each one, either record how FreeDEdit behaves and note any difference from TextEdit, or add a note that the difference is intentional. “Compare” means the feature exists but its behavior has not been documented against TextEdit; “Implement” means the behavior is not built yet and is listed as a known gap until it is.
 
 ### Highest-priority interactive comparisons
 
