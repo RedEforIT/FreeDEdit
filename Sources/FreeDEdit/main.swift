@@ -1989,11 +1989,33 @@ extension TextDocument: NSToolbarDelegate {
         updateToolbarColorControlViews()
     }
 
+    private func applyToolbarColor(_ attribute: ToolbarColorAttribute) {
+        guard let editor, editor.isRichText, editor.isEditable else { return }
+        let range = editor.selectedRange()
+        registerFormattingUndo(in: editor, range: range)
+        let color = toolbarColor(for: attribute)
+        let formatting: [NSAttributedString.Key: Any]
+        switch attribute {
+        case .text:
+            formatting = [.foregroundColor: color]
+        case .underline:
+            formatting = [.underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: color]
+        case .highlight:
+            formatting = [.backgroundColor: color.withAlphaComponent(0.35)]
+        }
+        if range.length > 0 { editor.textStorage?.addAttributes(formatting, range: range) }
+        var attributes = editor.typingAttributes
+        formatting.forEach { attributes[$0.key] = $0.value }
+        editor.typingAttributes = attributes
+        editor.didChangeText()
+        updateFormattingToolbarState()
+    }
+
     private func makeToolbarColorControl(_ attribute: ToolbarColorAttribute) -> NSView {
         // Keep these controls on one compact toolbar row. Tall custom views
         // overlap the title bar in NSToolbar, especially in compact windows.
-        let group = NSView(frame: NSRect(x: 0, y: 0, width: 64, height: 22))
-        let icon = NSImageView(frame: NSRect(x: 0, y: 6, width: 10, height: 10))
+        let group = NSView(frame: NSRect(x: 0, y: 0, width: 44, height: 22))
+        let icon = NSImageView(frame: NSRect(x: 1, y: 5, width: 16, height: 16))
         icon.image = NSImage(systemSymbolName: attribute.symbol, accessibilityDescription: attribute.title)
         icon.contentTintColor = toolbarColor(for: attribute)
         icon.setAccessibilityLabel("\(attribute.title) color")
@@ -2001,7 +2023,7 @@ extension TextDocument: NSToolbarDelegate {
         icon.imageScaling = .scaleProportionallyDown
         group.addSubview(icon)
 
-        let swatch = NSView(frame: NSRect(x: 0, y: 2, width: 10, height: 2))
+        let swatch = NSView(frame: NSRect(x: 2, y: 1, width: 14, height: 2))
         swatch.wantsLayer = true
         swatch.layer?.backgroundColor = toolbarColor(for: attribute).cgColor
         swatch.layer?.cornerRadius = 2
@@ -2009,28 +2031,15 @@ extension TextDocument: NSToolbarDelegate {
         swatch.setAccessibilityLabel("Current \(attribute.title.lowercased()) color")
         group.addSubview(swatch)
 
-        let apply = NSButton(title: "Apply", target: self, action: #selector(applyToolbarColor(_:)))
-        apply.tag = attribute.rawValue
-        apply.bezelStyle = .rounded
-        apply.bezelColor = .systemBlue
-        apply.contentTintColor = .white
-        apply.font = .systemFont(ofSize: 8, weight: .semibold)
-        apply.controlSize = .mini
-        apply.toolTip = "Apply \(attribute.title.lowercased()) color to selected text or future typing"
-        apply.setAccessibilityLabel("Apply \(attribute.title.lowercased()) color")
-        apply.setAccessibilityHelp(apply.toolTip)
-        apply.frame = NSRect(x: 12, y: 2, width: 34, height: 18)
-
         let choose = NSButton(title: "", target: self, action: #selector(showToolbarColorMenu(_:)))
         choose.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Choose color")
         choose.tag = attribute.rawValue
         choose.bezelStyle = .rounded
         choose.controlSize = .mini
-        choose.image?.size = NSSize(width: 8, height: 8)
-        choose.toolTip = "Choose \(attribute.title.lowercased()) color"
+        choose.image?.size = NSSize(width: 9, height: 9)
+        choose.toolTip = "Choose and apply \(attribute.title.lowercased()) color"
         choose.setAccessibilityLabel("Choose \(attribute.title.lowercased()) color")
-        choose.frame = NSRect(x: 48, y: 2, width: 16, height: 18)
-        group.addSubview(apply)
+        choose.frame = NSRect(x: 21, y: 2, width: 20, height: 18)
         group.addSubview(choose)
         group.setAccessibilityElement(true)
         group.setAccessibilityRole(.group)
@@ -2076,6 +2085,7 @@ extension TextDocument: NSToolbarDelegate {
         guard let attribute = ToolbarColorAttribute(rawValue: sender.tag),
               let color = sender.representedObject as? NSColor else { return }
         setToolbarColor(color, for: attribute)
+        applyToolbarColor(attribute)
     }
 
     @objc private func showToolbarColorPanel(_ sender: NSMenuItem) {
@@ -2090,7 +2100,9 @@ extension TextDocument: NSToolbarDelegate {
     }
 
     @objc private func toolbarColorPanelDidChange(_ sender: NSColorPanel) {
-        setToolbarColor(sender.color, for: toolbarColorPanelTarget)
+        let attribute = toolbarColorPanelTarget
+        setToolbarColor(sender.color, for: attribute)
+        applyToolbarColor(attribute)
     }
 
     @objc private func applyToolbarStylePreset(_ sender: NSMenuItem) {
@@ -2418,28 +2430,4 @@ extension TextDocument: NSToolbarDelegate {
         editor.didChangeText()
     }
 
-    @objc private func applyToolbarColor(_ sender: NSButton) {
-        guard let editor, editor.isRichText, editor.isEditable,
-              let attribute = ToolbarColorAttribute(rawValue: sender.tag) else { return }
-        let range = editor.selectedRange()
-        registerFormattingUndo(in: editor, range: range)
-        let color = toolbarColor(for: attribute)
-        var formatting: [NSAttributedString.Key: Any]
-        switch attribute {
-        case .text:
-            formatting = [.foregroundColor: color]
-        case .underline:
-            formatting = [.underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: color]
-        case .highlight:
-            formatting = [.backgroundColor: color.withAlphaComponent(0.35)]
-        }
-        if range.length > 0 {
-            editor.textStorage?.addAttributes(formatting, range: range)
-        }
-        var attributes = editor.typingAttributes
-        formatting.forEach { attributes[$0.key] = $0.value }
-        editor.typingAttributes = attributes
-        editor.didChangeText()
-        updateFormattingToolbarState()
-    }
 }
