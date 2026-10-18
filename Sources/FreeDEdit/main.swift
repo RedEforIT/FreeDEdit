@@ -210,6 +210,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         formatMenu.addItem(.separator())
         let rulerItem = NSMenuItem(title: "Show Ruler", action: #selector(TextDocument.toggleRuler(_:)), keyEquivalent: "r")
         formatMenu.addItem(rulerItem)
+        formatMenu.addItem(withTitle: "Copy Ruler", action: #selector(NSText.copyRuler(_:)), keyEquivalent: "")
+        formatMenu.addItem(withTitle: "Paste Ruler", action: #selector(NSText.pasteRuler(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Wrap to Page", action: #selector(TextDocument.togglePageWrap(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Prevent Editing", action: #selector(TextDocument.toggleEditingProtection(_:)), keyEquivalent: "")
         let sizeMenu = NSMenu(title: "Size")
@@ -481,6 +483,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.selectedRange().length > 0
             case "pasteFont:":
+                item.target = editor
+                item.isEnabled = editor.isRichText && editor.isEditable
+            case "copyRuler:":
+                item.target = editor
+                item.isEnabled = editor.isRichText
+            case "pasteRuler:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "toggleRichPlainText:":
