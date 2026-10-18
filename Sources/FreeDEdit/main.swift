@@ -740,6 +740,12 @@ final class SettingsWindowController: NSWindowController {
 
 @objc(TextDocument)
 final class TextDocument: NSDocument {
+    private struct TextModeSnapshot {
+        let contents: NSAttributedString
+        let isRichText: Bool
+        let showsRuler: Bool
+        let selection: NSRange
+    }
     private var text = NSAttributedString(string: "")
     private weak var editor: NSTextView?
     private var isPlainText = (UserDefaults.standard.object(forKey: "DefaultRichText") as? Bool) == false
@@ -1072,34 +1078,77 @@ final class TextDocument: NSDocument {
 
 
     @objc func makePlainText(_ sender: Any?) {
-        guard let editor, editor.isRichText, editor.isEditable else { return }
-        let plain = editor.string
-        editor.isRichText = false
-        editor.usesRuler = false
-        editor.enclosingScrollView?.rulersVisible = false
-        editor.window?.toolbar?.isVisible = false
-        editor.string = plain
-        text = NSAttributedString(string: plain)
-        isPlainText = true
-        updateChangeCount(.changeDone)
+        changeTextMode(toRichText: false)
     }
 
     @objc func makeRichText(_ sender: Any?) {
-        guard let editor, !editor.isRichText, editor.isEditable else { return }
-        editor.isRichText = true
-        let showRuler = UserDefaults.standard.object(forKey: "ShowRuler") as? Bool ?? true
-        editor.usesRuler = showRuler
-        editor.enclosingScrollView?.rulersVisible = showRuler
-        editor.window?.toolbar?.isVisible = true
-        isPlainText = false
-        text = editor.attributedString()
-        updateChangeCount(.changeDone)
+        changeTextMode(toRichText: true)
     }
 
     @objc func toggleRichPlainText(_ sender: Any?) {
         guard let editor, editor.isEditable else { return }
-        if editor.isRichText { makePlainText(sender) }
-        else { makeRichText(sender) }
+        changeTextMode(toRichText: !editor.isRichText)
+    }
+
+    private func textModeSnapshot(from editor: NSTextView) -> TextModeSnapshot {
+        let showsRuler = editor.isRichText
+            ? editor.usesRuler
+            : (UserDefaults.standard.object(forKey: "ShowRuler") as? Bool ?? true)
+        return TextModeSnapshot(contents: NSAttributedString(attributedString: editor.attributedString()),
+                                isRichText: editor.isRichText,
+                                showsRuler: showsRuler,
+                                selection: editor.selectedRange())
+    }
+
+    private func changeTextMode(toRichText isRichText: Bool) {
+        guard let editor, editor.isEditable, editor.isRichText != isRichText else { return }
+        let previous = textModeSnapshot(from: editor)
+        let actionName = isRichText ? "Make Rich Text" : "Make Plain Text"
+        let undoManager = editor.undoManager
+        undoManager?.disableUndoRegistration()
+        let rulerPreference = isRichText
+            ? (previous.isRichText ? previous.showsRuler : (UserDefaults.standard.object(forKey: "ShowRuler") as? Bool ?? true))
+            : false
+        applyTextMode(TextModeSnapshot(contents: previous.contents, isRichText: isRichText,
+                                       showsRuler: rulerPreference, selection: previous.selection), to: editor)
+        undoManager?.enableUndoRegistration()
+        undoManager?.registerUndo(withTarget: self) { document in
+            document.restoreTextMode(previous, actionName: actionName)
+        }
+        undoManager?.setActionName(actionName)
+        updateChangeCount(.changeDone)
+    }
+
+    private func restoreTextMode(_ snapshot: TextModeSnapshot, actionName: String) {
+        guard let editor else { return }
+        let current = textModeSnapshot(from: editor)
+        let undoManager = editor.undoManager
+        undoManager?.disableUndoRegistration()
+        applyTextMode(snapshot, to: editor)
+        undoManager?.enableUndoRegistration()
+        undoManager?.registerUndo(withTarget: self) { document in
+            document.restoreTextMode(current, actionName: actionName)
+        }
+        undoManager?.setActionName(actionName)
+    }
+
+    private func applyTextMode(_ snapshot: TextModeSnapshot, to editor: NSTextView) {
+        editor.isRichText = snapshot.isRichText
+        if snapshot.isRichText {
+            editor.textStorage?.setAttributedString(snapshot.contents)
+            editor.usesRuler = snapshot.showsRuler
+        } else {
+            editor.usesRuler = false
+            editor.string = snapshot.contents.string
+        }
+        editor.enclosingScrollView?.rulersVisible = editor.usesRuler
+        editor.window?.toolbar?.isVisible = snapshot.isRichText
+        let textLength = (editor.string as NSString).length
+        let location = min(snapshot.selection.location, textLength)
+        let length = min(snapshot.selection.length, textLength - location)
+        editor.setSelectedRange(NSRange(location: location, length: length))
+        text = editor.attributedString()
+        isPlainText = !snapshot.isRichText
     }
 
     @objc func toggleRuler(_ sender: Any?) {
