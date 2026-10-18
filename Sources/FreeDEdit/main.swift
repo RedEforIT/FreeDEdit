@@ -187,6 +187,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         directionMenu.addItem(withTitle: "Right to Left", action: #selector(NSResponder.makeBaseWritingDirectionRightToLeft(_:)), keyEquivalent: "")
         directionItem.submenu = directionMenu
         formatMenu.addItem(directionItem)
+        let kerningItem = NSMenuItem(title: "Kerning", action: nil, keyEquivalent: "")
+        let kerningMenu = NSMenu(title: "Kerning")
+        kerningMenu.delegate = self
+        kerningMenu.addItem(withTitle: "Use Standard", action: #selector(NSTextView.useStandardKerning(_:)), keyEquivalent: "")
+        kerningMenu.addItem(withTitle: "Tighten", action: #selector(NSTextView.tightenKerning(_:)), keyEquivalent: "")
+        kerningMenu.addItem(withTitle: "Loosen", action: #selector(NSTextView.loosenKerning(_:)), keyEquivalent: "")
+        kerningMenu.addItem(withTitle: "Use None", action: #selector(NSTextView.turnOffKerning(_:)), keyEquivalent: "")
+        kerningItem.submenu = kerningMenu
+        formatMenu.addItem(kerningItem)
         if #available(macOS 15.0, *) {
             let highlightItem = NSMenuItem(title: "Highlight", action: nil, keyEquivalent: "")
             let highlightMenu = NSMenu(title: "Highlight")
@@ -514,6 +523,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable && editor.selectedRange().length > 0
             case "makeBaseWritingDirectionNatural:", "makeBaseWritingDirectionLeftToRight:", "makeBaseWritingDirectionRightToLeft:":
+                item.target = editor
+                item.isEnabled = editor.isRichText && editor.isEditable
+            case "useStandardKerning:", "tightenKerning:", "loosenKerning:", "turnOffKerning:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "toggleRichPlainText:":
