@@ -1413,7 +1413,7 @@ final class TextDocument: NSDocument {
     }
 
     private func applyList(markerFormat: NSTextList.MarkerFormat?) {
-        guard let editor, editor.isRichText, let storage = editor.textStorage else { return }
+        guard let editor, editor.isRichText, editor.isEditable, let storage = editor.textStorage else { return }
         if storage.length == 0 {
             editor.insertText("\n", replacementRange: NSRange(location: 0, length: 0))
         }
@@ -1424,6 +1424,10 @@ final class TextDocument: NSDocument {
         let finalCharacter = selection.length == 0 ? safeStart : max(safeStart, safeEnd - 1)
         let start = content.paragraphRange(for: NSRange(location: safeStart, length: 0)).location
         let end = NSMaxRange(content.paragraphRange(for: NSRange(location: finalCharacter, length: 0)))
+        let affectedRange = NSRange(location: start, length: end - start)
+        let undoManager = editor.undoManager
+        if affectedRange.length > 0 { undoManager?.beginUndoGrouping() }
+        registerFormattingUndo(in: editor, range: affectedRange)
         let list = markerFormat.map { NSTextList(markerFormat: $0, options: 0) }
         var cursor = start
         while cursor < end {
@@ -1435,6 +1439,10 @@ final class TextDocument: NSDocument {
             cursor = NSMaxRange(paragraphRange)
         }
         editor.didChangeText()
+        if affectedRange.length > 0 {
+            undoManager?.setActionName(markerFormat == nil ? "Remove List" : "List")
+            undoManager?.endUndoGrouping()
+        }
     }
 
     @objc func insertAttachment(_ sender: Any?) {
