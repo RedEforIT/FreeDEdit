@@ -259,6 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         textMenu.addItem(withTitle: "Show Ruler", action: #selector(TextDocument.toggleRuler(_:)), keyEquivalent: "r")
         textMenu.addItem(withTitle: "Copy Ruler", action: #selector(NSText.copyRuler(_:)), keyEquivalent: "")
         textMenu.addItem(withTitle: "Paste Ruler", action: #selector(NSText.pasteRuler(_:)), keyEquivalent: "")
+        textMenu.addItem(withTitle: "Spacing…", action: #selector(NSTextView.orderFrontSpacingPanel(_:)), keyEquivalent: "")
         textItem.submenu = textMenu
         formatMenu.addItem(textItem)
 
@@ -542,6 +543,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.target = editor
                 item.isEnabled = editor.isRichText
             case "pasteRuler:":
+                item.target = editor
+                item.isEnabled = editor.isRichText && editor.isEditable
+            case "orderFrontSpacingPanel:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "raiseBaseline:", "lowerBaseline:":
