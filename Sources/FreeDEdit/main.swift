@@ -878,6 +878,28 @@ final class SettingsWindowController: NSWindowController {
     }
 }
 
+private enum ToolbarColorAttribute: Int {
+    case text = 1
+    case underline = 2
+    case highlight = 3
+
+    var title: String {
+        switch self {
+        case .text: "Text"
+        case .underline: "Underline"
+        case .highlight: "Highlight"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .text: "textformat"
+        case .underline: "underline"
+        case .highlight: "highlighter"
+        }
+    }
+}
+
 @objc(TextDocument)
 final class TextDocument: NSDocument {
     private struct TextModeSnapshot {
@@ -894,7 +916,10 @@ final class TextDocument: NSDocument {
     private var restorationID = UUID().uuidString
     private var restoredSelection: NSRange?
     private var restoredScrollY: CGFloat?
+    private var toolbarTextColor: NSColor = .labelColor
+    private var toolbarUnderlineColor: NSColor = .systemBlue
     private var toolbarHighlightColor: NSColor = .controlAccentColor
+    private var toolbarColorPanelTarget: ToolbarColorAttribute = .text
     var findReplaceEditor: NSTextView? { editor }
     var menuEditor: NSTextView? { editor }
 
@@ -1844,7 +1869,7 @@ extension TextDocument: NSTextViewDelegate {
 extension TextDocument: NSToolbarDelegate {
     private var toolbarIDs: [NSToolbarItem.Identifier] {
         [.init("paragraphStyle"), .init("bold"), .init("italic"), .init("underline"), .init("strike"),
-         .init("textColor"), .init("textBackground"), .init("highlight"), .init("highlightColor"),
+         .init("textColor"), .init("underlineColor"), .init("highlightColor"),
          .init("fontFamily"), .init("fontStyle"), .init("fontSize"), .init("alignment"), .init("listStyle"), .init("lineSpacing")]
     }
 
@@ -1874,23 +1899,6 @@ extension TextDocument: NSToolbarDelegate {
             let showStyles = NSMenuItem(title: "Show Styles…", action: Selector("orderFrontStylesPanel:"), keyEquivalent: "")
             showStyles.target = NSFontManager.shared
             menu.addItem(showStyles)
-            item.menu = menu
-            return item
-        }
-        if itemIdentifier.rawValue == "highlightColor" {
-            let item = NSMenuToolbarItem(itemIdentifier: itemIdentifier)
-            item.label = "Highlight Color"
-            item.paletteLabel = "Highlight Color"
-            item.image = NSImage(systemSymbolName: "paintpalette", accessibilityDescription: "Highlight Color")
-                ?? NSImage(systemSymbolName: "highlighter", accessibilityDescription: "Highlight Color")
-            item.showsIndicator = true
-            let menu = NSMenu(title: "Highlight Color")
-            for (title, color) in toolbarHighlightChoices {
-                let menuItem = NSMenuItem(title: title, action: #selector(selectToolbarHighlightColor(_:)), keyEquivalent: "")
-                menuItem.target = self
-                menuItem.representedObject = color
-                menu.addItem(menuItem)
-            }
             item.menu = menu
             return item
         }
@@ -1931,32 +1939,13 @@ extension TextDocument: NSToolbarDelegate {
             item.view = popup
         case "textColor":
             item.label = "Text Color"
-            let colorWell = NSColorWell(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
-            colorWell.color = .black
-            colorWell.target = self
-            colorWell.action = #selector(applyColor(_:))
-            colorWell.tag = 0
-            item.view = colorWell
-        case "textBackground":
-            item.label = "Text Background"
-            let colorWell = NSColorWell(frame: NSRect(x: 0, y: 0, width: 24, height: 24))
-            colorWell.color = .clear
-            colorWell.target = self
-            colorWell.action = #selector(applyColor(_:))
-            colorWell.tag = 1
-            item.view = colorWell
-        case "highlight":
-            item.label = "Highlight"
-            let button = NSButton(title: "", target: self, action: #selector(toggleToolbarHighlight(_:)))
-            button.setButtonType(.toggle)
-            button.bezelStyle = .texturedRounded
-            button.image = NSImage(systemSymbolName: "highlighter", accessibilityDescription: "Highlight")
-                ?? NSImage(systemSymbolName: "pencil.tip.crop.circle", accessibilityDescription: "Highlight")
-            button.imagePosition = .imageOnly
-            button.toolTip = "Highlight text"
-            button.setAccessibilityLabel("Highlight")
-            button.frame = NSRect(x: 0, y: 0, width: 26, height: 24)
-            item.view = button
+            item.view = makeToolbarColorControl(.text)
+        case "underlineColor":
+            item.label = "Underline Color"
+            item.view = makeToolbarColorControl(.underline)
+        case "highlightColor":
+            item.label = "Highlight Color"
+            item.view = makeToolbarColorControl(.highlight)
         case "alignment":
             item.label = "Alignment"
             let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 88, height: 24), pullsDown: false)
@@ -1983,39 +1972,130 @@ extension TextDocument: NSToolbarDelegate {
         return item
     }
 
-    private var toolbarHighlightChoices: [(String, NSColor)] {
-        [("Accent", .controlAccentColor), ("Purple", .systemPurple), ("Pink", .systemPink),
-         ("Orange", .systemOrange), ("Mint", .systemMint), ("Blue", .systemBlue)]
-    }
-
-    @objc private func selectToolbarHighlightColor(_ sender: NSMenuItem) {
-        guard let color = sender.representedObject as? NSColor else { return }
-        toolbarHighlightColor = color
-        let highlightButton = editor?.window?.toolbar?.items.first(where: { $0.itemIdentifier.rawValue == "highlight" })?.view as? NSButton
-        if highlightButton?.state == NSControl.StateValue.on {
-            setToolbarHighlight(enabled: true)
+    private func toolbarColor(for attribute: ToolbarColorAttribute) -> NSColor {
+        switch attribute {
+        case .text: toolbarTextColor
+        case .underline: toolbarUnderlineColor
+        case .highlight: toolbarHighlightColor
         }
     }
 
-    @objc private func toggleToolbarHighlight(_ sender: NSButton) {
-        setToolbarHighlight(enabled: sender.state == .on)
+    private func setToolbarColor(_ color: NSColor, for attribute: ToolbarColorAttribute) {
+        switch attribute {
+        case .text: toolbarTextColor = color
+        case .underline: toolbarUnderlineColor = color
+        case .highlight: toolbarHighlightColor = color
+        }
+        updateToolbarColorControlViews()
     }
 
-    private func setToolbarHighlight(enabled: Bool) {
-        guard let editor, editor.isRichText, editor.isEditable else { return }
-        let range = editor.selectedRange()
-        registerFormattingUndo(in: editor, range: range)
-        let highlight = toolbarHighlightColor.withAlphaComponent(0.35)
-        if range.length > 0 {
-            if enabled { editor.textStorage?.addAttribute(.backgroundColor, value: highlight, range: range) }
-            else { editor.textStorage?.removeAttribute(.backgroundColor, range: range) }
+    private func makeToolbarColorControl(_ attribute: ToolbarColorAttribute) -> NSView {
+        let group = NSView(frame: NSRect(x: 0, y: 0, width: 68, height: 54))
+        let icon = NSImageView(frame: NSRect(x: 27, y: 30, width: 14, height: 14))
+        icon.image = NSImage(systemSymbolName: attribute.symbol, accessibilityDescription: attribute.title)
+        icon.contentTintColor = toolbarColor(for: attribute)
+        icon.setAccessibilityLabel("\(attribute.title) color")
+        icon.tag = 100 + attribute.rawValue
+        icon.imageScaling = .scaleProportionallyDown
+        group.addSubview(icon)
+
+        let title = NSTextField(labelWithString: attribute.title)
+        title.frame = NSRect(x: 0, y: 20, width: 68, height: 10)
+        title.font = .systemFont(ofSize: 8, weight: .medium)
+        title.textColor = .secondaryLabelColor
+        title.alignment = .center
+        group.addSubview(title)
+
+        let swatch = NSView(frame: NSRect(x: 22, y: 14, width: 24, height: 3))
+        swatch.wantsLayer = true
+        swatch.layer?.backgroundColor = toolbarColor(for: attribute).cgColor
+        swatch.layer?.cornerRadius = 2
+        swatch.identifier = NSUserInterfaceItemIdentifier("toolbar-color-swatch-\(attribute.rawValue)")
+        swatch.setAccessibilityLabel("Current \(attribute.title.lowercased()) color")
+        group.addSubview(swatch)
+
+        let apply = NSButton(title: "Apply", target: self, action: #selector(applyToolbarColor(_:)))
+        apply.tag = attribute.rawValue
+        apply.bezelStyle = .rounded
+        apply.bezelColor = .systemBlue
+        apply.contentTintColor = .white
+        apply.font = .systemFont(ofSize: 9, weight: .semibold)
+        apply.controlSize = .mini
+        apply.toolTip = "Apply \(attribute.title.lowercased()) color to selected text or future typing"
+        apply.setAccessibilityLabel("Apply \(attribute.title.lowercased()) color")
+        apply.setAccessibilityHelp(apply.toolTip)
+        apply.frame = NSRect(x: 0, y: 0, width: 44, height: 18)
+
+        let choose = NSButton(title: "", target: self, action: #selector(showToolbarColorMenu(_:)))
+        choose.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Choose color")
+        choose.tag = attribute.rawValue
+        choose.bezelStyle = .rounded
+        choose.controlSize = .mini
+        choose.image?.size = NSSize(width: 9, height: 9)
+        choose.toolTip = "Choose \(attribute.title.lowercased()) color"
+        choose.setAccessibilityLabel("Choose \(attribute.title.lowercased()) color")
+        choose.frame = NSRect(x: 46, y: 0, width: 20, height: 18)
+        group.addSubview(apply)
+        group.addSubview(choose)
+        group.setAccessibilityElement(true)
+        group.setAccessibilityRole(.group)
+        group.setAccessibilityLabel("\(attribute.title) color controls")
+        return group
+    }
+
+    private func toolbarColorChoices(for attribute: ToolbarColorAttribute) -> [(String, NSColor)] {
+        [("Black", .black), ("Red", .systemRed), ("Orange", .systemOrange),
+         ("Yellow", .systemYellow), ("Green", .systemGreen), ("Blue", .systemBlue),
+         ("Purple", .systemPurple), ("Pink", .systemPink), ("White", .white)]
+    }
+
+    @objc private func showToolbarColorMenu(_ sender: NSButton) {
+        guard let attribute = ToolbarColorAttribute(rawValue: sender.tag) else { return }
+        let menu = NSMenu(title: "\(attribute.title) Color")
+        for (name, color) in toolbarColorChoices(for: attribute) {
+            let item = NSMenuItem(title: name, action: #selector(selectToolbarColor(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = attribute.rawValue
+            item.representedObject = color
+            item.state = color.isEqual(toolbarColor(for: attribute)) ? .on : .off
+            item.image = colorSwatchImage(color)
+            menu.addItem(item)
         }
-        var attributes = editor.typingAttributes
-        if enabled { attributes[.backgroundColor] = highlight }
-        else { attributes.removeValue(forKey: .backgroundColor) }
-        editor.typingAttributes = attributes
-        editor.didChangeText()
-        updateFormattingToolbarState()
+        menu.addItem(.separator())
+        let custom = NSMenuItem(title: "Show Colors…", action: #selector(showToolbarColorPanel(_:)), keyEquivalent: "")
+        custom.target = self
+        custom.tag = attribute.rawValue
+        menu.addItem(custom)
+        menu.popUp(positioning: nil, at: NSPoint(x: -160, y: 0), in: sender)
+    }
+
+    private func colorSwatchImage(_ color: NSColor) -> NSImage {
+        NSImage(size: NSSize(width: 14, height: 14), flipped: false) { rect in
+            color.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 2, dy: 2)).fill()
+            return true
+        }
+    }
+
+    @objc private func selectToolbarColor(_ sender: NSMenuItem) {
+        guard let attribute = ToolbarColorAttribute(rawValue: sender.tag),
+              let color = sender.representedObject as? NSColor else { return }
+        setToolbarColor(color, for: attribute)
+    }
+
+    @objc private func showToolbarColorPanel(_ sender: NSMenuItem) {
+        guard let attribute = ToolbarColorAttribute(rawValue: sender.tag) else { return }
+        toolbarColorPanelTarget = attribute
+        let panel = NSColorPanel.shared
+        panel.color = toolbarColor(for: attribute)
+        panel.setTarget(self)
+        panel.setAction(#selector(toolbarColorPanelDidChange(_:)))
+        panel.isContinuous = true
+        panel.orderFront(nil)
+    }
+
+    @objc private func toolbarColorPanelDidChange(_ sender: NSColorPanel) {
+        setToolbarColor(sender.color, for: toolbarColorPanelTarget)
     }
 
     @objc private func applyToolbarStylePreset(_ sender: NSMenuItem) {
@@ -2145,6 +2225,9 @@ extension TextDocument: NSToolbarDelegate {
         let attributes = length > 0 ? storage?.attributes(at: location, effectiveRange: nil) ?? [:] : editor.typingAttributes
         let font = attributes[.font] as? NSFont ?? editor.font ?? NSFont.systemFont(ofSize: 12)
         let traits = NSFontManager.shared.traits(of: font)
+        if let color = attributes[.foregroundColor] as? NSColor { toolbarTextColor = color }
+        if let color = attributes[.underlineColor] as? NSColor { toolbarUnderlineColor = color }
+        if let color = attributes[.backgroundColor] as? NSColor { toolbarHighlightColor = color.withAlphaComponent(1) }
         for item in toolbar.items {
             switch item.itemIdentifier.rawValue {
             case "bold":
@@ -2167,26 +2250,11 @@ extension TextDocument: NSToolbarDelegate {
                 (item.view as? NSPopUpButton)?.selectItem(at: style)
             case "fontSize":
                 (item.view as? NSTextField)?.stringValue = String(format: "%.0f", font.pointSize)
-            case "textColor":
-                (item.view as? NSColorWell)?.color = attributes[.foregroundColor] as? NSColor ?? .clear
-            case "textBackground":
-                (item.view as? NSColorWell)?.color = attributes[.backgroundColor] as? NSColor ?? .clear
-            case "highlight":
-                let background = attributes[.backgroundColor] as? NSColor
-                (item.view as? NSButton)?.state = background != nil && background != .clear ? .on : .off
             case "paragraphStyle":
                 let index = traits.contains(.boldFontMask) ? 1 : (traits.contains(.italicFontMask) ? 2 : 0)
                 if let menu = (item as? NSMenuToolbarItem)?.menu {
                     for (itemIndex, menuItem) in menu.items.enumerated() {
                         menuItem.state = itemIndex == index ? NSControl.StateValue.on : .off
-                    }
-                }
-            case "highlightColor":
-                let color = (attributes[.backgroundColor] as? NSColor)?.withAlphaComponent(1) ?? toolbarHighlightColor
-                if let menu = (item as? NSMenuToolbarItem)?.menu {
-                    for menuItem in menu.items {
-                        let menuColor = menuItem.representedObject as? NSColor
-                        menuItem.state = menuColor?.isEqual(color) == true ? NSControl.StateValue.on : .off
                     }
                 }
             case "alignment":
@@ -2211,6 +2279,33 @@ extension TextDocument: NSToolbarDelegate {
                 break
             }
         }
+        updateToolbarColorControlViews()
+    }
+
+    private func updateToolbarColorControlViews() {
+        guard let toolbar = editor?.window?.toolbar else { return }
+        for (identifier, attribute) in [
+            ("textColor", ToolbarColorAttribute.text),
+            ("underlineColor", ToolbarColorAttribute.underline),
+            ("highlightColor", ToolbarColorAttribute.highlight)
+        ] {
+            guard let view = toolbar.items.first(where: { $0.itemIdentifier.rawValue == identifier })?.view else { continue }
+            let color = toolbarColor(for: attribute)
+            view.viewWithTag(100 + attribute.rawValue).flatMap { $0 as? NSImageView }?.contentTintColor = color
+            if let swatch = toolbarColorSwatch(in: view, attribute: attribute) {
+                swatch.wantsLayer = true
+                swatch.layer?.backgroundColor = color.cgColor
+            }
+        }
+    }
+
+    private func toolbarColorSwatch(in view: NSView, attribute: ToolbarColorAttribute) -> NSView? {
+        let identifier = NSUserInterfaceItemIdentifier("toolbar-color-swatch-\(attribute.rawValue)")
+        if view.identifier == identifier { return view }
+        for child in view.subviews {
+            if let match = toolbarColorSwatch(in: child, attribute: attribute) { return match }
+        }
+        return nil
     }
 
     private func registerFormattingUndo(in editor: NSTextView, range: NSRange) {
@@ -2328,17 +2423,28 @@ extension TextDocument: NSToolbarDelegate {
         editor.didChangeText()
     }
 
-    @objc private func applyColor(_ sender: NSColorWell) {
-        guard let editor else { return }
-        let key: NSAttributedString.Key = sender.tag == 0 ? .foregroundColor : .backgroundColor
+    @objc private func applyToolbarColor(_ sender: NSButton) {
+        guard let editor, editor.isRichText, editor.isEditable,
+              let attribute = ToolbarColorAttribute(rawValue: sender.tag) else { return }
         let range = editor.selectedRange()
         registerFormattingUndo(in: editor, range: range)
-        if range.length > 0 { editor.textStorage?.addAttribute(key, value: sender.color, range: range) }
-        else {
-            var attributes = editor.typingAttributes
-            attributes[key] = sender.color
-            editor.typingAttributes = attributes
+        let color = toolbarColor(for: attribute)
+        var formatting: [NSAttributedString.Key: Any]
+        switch attribute {
+        case .text:
+            formatting = [.foregroundColor: color]
+        case .underline:
+            formatting = [.underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: color]
+        case .highlight:
+            formatting = [.backgroundColor: color.withAlphaComponent(0.35)]
         }
+        if range.length > 0 {
+            editor.textStorage?.addAttributes(formatting, range: range)
+        }
+        var attributes = editor.typingAttributes
+        formatting.forEach { attributes[$0.key] = $0.value }
+        editor.typingAttributes = attributes
         editor.didChangeText()
+        updateFormattingToolbarState()
     }
 }
