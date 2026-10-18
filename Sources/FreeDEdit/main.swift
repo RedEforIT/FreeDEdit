@@ -1325,7 +1325,7 @@ final class TextDocument: NSDocument {
         do {
             parsed = try NSAttributedString(markdown: source,
                                             options: .init(interpretedSyntax: .full),
-                                            baseURL: nil)
+                                            baseURL: fileURL?.deletingLastPathComponent())
         } catch {
             return NSAttributedString(string: source)
         }
@@ -1346,6 +1346,24 @@ final class TextDocument: NSDocument {
                 .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.16)
             ], range: range)
             Self.highlightMarkdownCode(in: output, range: range)
+        }
+        let imageURLKey = NSAttributedString.Key("NSImageURL")
+        var localImages: [(NSRange, URL)] = []
+        output.enumerateAttribute(imageURLKey,
+                                  in: NSRange(location: 0, length: output.length)) { value, range, _ in
+            guard let url = value as? URL, url.isFileURL else { return }
+            localImages.append((range, url))
+        }
+        for (range, url) in localImages.reversed() {
+            guard let data = try? Data(contentsOf: url), let image = NSImage(data: data) else { continue }
+            let attachment = NSTextAttachment()
+            attachment.image = image
+            let naturalSize = image.size
+            let scale = min(1, 640 / max(naturalSize.width, 1))
+            attachment.bounds = NSRect(x: 0, y: 0,
+                                       width: naturalSize.width * scale,
+                                       height: naturalSize.height * scale)
+            output.replaceCharacters(in: range, with: NSAttributedString(attachment: attachment))
         }
         return output
     }
