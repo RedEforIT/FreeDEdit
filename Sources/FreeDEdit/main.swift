@@ -204,6 +204,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ligaturesMenu.addItem(withTitle: "Use None", action: #selector(NSTextView.turnOffLigatures(_:)), keyEquivalent: "")
         ligaturesItem.submenu = ligaturesMenu
         formatMenu.addItem(ligaturesItem)
+        let scriptItem = NSMenuItem(title: "Script", action: nil, keyEquivalent: "")
+        let scriptMenu = NSMenu(title: "Script")
+        scriptMenu.delegate = self
+        scriptMenu.addItem(withTitle: "Subscript", action: #selector(NSText.subscript(_:)), keyEquivalent: "")
+        scriptMenu.addItem(withTitle: "Superscript", action: #selector(NSText.superscript(_:)), keyEquivalent: "")
+        scriptItem.submenu = scriptMenu
+        formatMenu.addItem(scriptItem)
         if #available(macOS 15.0, *) {
             let highlightItem = NSMenuItem(title: "Highlight", action: nil, keyEquivalent: "")
             let highlightMenu = NSMenu(title: "Highlight")
@@ -537,6 +544,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "useStandardLigatures:", "useAllLigatures:", "turnOffLigatures:":
+                item.target = editor
+                item.isEnabled = editor.isRichText && editor.isEditable
+            case "subscript:", "superscript:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "toggleRichPlainText:":
