@@ -439,7 +439,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 document.showWindows()
             } catch {
                 TextDocument.pendingOpenOptions = nil
-                NSApp.presentError(error)
+                if let recoveryOptions = sourceRecoveryOptions(for: url, options: options) {
+                    openDocuments([url], options: recoveryOptions, at: 0) {
+                        self.openDocuments(urls, options: options, at: index + 1, completion: completion)
+                    }
+                } else {
+                    NSApp.presentError(error)
+                    openDocuments(urls, options: options, at: index + 1, completion: completion)
+                }
+                return
             }
             openDocuments(urls, options: options, at: index + 1, completion: completion)
             return
@@ -462,7 +470,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @MainActor private func sourceRecoveryOptions(for url: URL, options: TextDocument.OpenOptions) -> TextDocument.OpenOptions? {
-        guard !options.ignoreRichText, ["rtf", "rtfd", "html", "htm"].contains(url.pathExtension.lowercased()) else { return nil }
+        guard !options.ignoreRichText,
+              ["rtf", "rtfd", "html", "htm", "wordml"].contains(url.pathExtension.lowercased()) else { return nil }
         let alert = NSAlert()
         alert.messageText = "Couldn’t read the document formatting"
         alert.informativeText = "FreeDEdit can try to open the document’s readable source text instead. Formatting and embedded objects may be lost."
@@ -1662,7 +1671,8 @@ final class TextDocument: NSDocument {
         Self.pendingOpenOptions = nil
         let showRTFSource = typeName == UTType.rtf.identifier && (openOptions?.ignoreRichText ?? (UserDefaults.standard.object(forKey: "IgnoreRichText") as? Bool ?? false))
         let showHTMLSource = typeName == UTType.html.identifier && ((UserDefaults.standard.object(forKey: "IgnoreHTML") as? Bool ?? false) || (openOptions?.ignoreRichText ?? false))
-        if showRTFSource || showHTMLSource {
+        let showWordMLSource = typeName == "com.microsoft.word.wordml" && (openOptions?.ignoreRichText ?? false)
+        if showRTFSource || showHTMLSource || showWordMLSource {
             let source = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
             text = NSAttributedString(string: source)
             isPlainText = true
