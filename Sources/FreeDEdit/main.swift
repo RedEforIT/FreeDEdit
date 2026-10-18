@@ -447,8 +447,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "redo:":
                 item.title = editor.undoManager?.redoMenuItemTitle ?? "Redo"
                 item.isEnabled = editor.undoManager?.canRedo ?? false
+            case "cut:":
+                item.isEnabled = editor.isEditable && editor.selectedRange().length > 0
+            case "copy:":
+                item.isEnabled = editor.selectedRange().length > 0
             case "delete:":
                 item.isEnabled = editor.isEditable && editor.selectedRange().length > 0
+            case "performFindPanelAction:" where item.tag == Int(NSFindPanelAction.setFindString.rawValue):
+                item.isEnabled = editor.selectedRange().length > 0
             case "toggleRichPlainText:":
                 item.isEnabled = editor.isEditable
                 item.title = editor.isRichText ? "Make Plain Text" : "Make Rich Text"
