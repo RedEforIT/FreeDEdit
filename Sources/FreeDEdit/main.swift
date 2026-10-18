@@ -273,23 +273,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         richPlainItem.keyEquivalentModifierMask = [.command, .shift]
         formatMenu.addItem(richPlainItem)
         formatMenu.addItem(.separator())
-        let listsItem = NSMenuItem(title: "Lists", action: nil, keyEquivalent: "")
-        let listsMenu = NSMenu(title: "Lists")
-        listsMenu.delegate = self
-        for (title, selector) in [("Bulleted List", #selector(TextDocument.toggleBulletedList(_:))),
-                                  ("Numbered List", #selector(TextDocument.toggleNumberedList(_:))),
-                                  ("Remove List", #selector(TextDocument.removeList(_:)))] {
-            listsMenu.addItem(withTitle: title, action: selector, keyEquivalent: "")
-        }
-        listsItem.submenu = listsMenu
-        formatMenu.addItem(listsItem)
-        formatMenu.addItem(withTitle: "List…", action: #selector(NSTextView.orderFrontListPanel(_:)), keyEquivalent: "")
-        formatMenu.addItem(withTitle: "Table…", action: #selector(TextDocument.insertTable(_:)), keyEquivalent: "")
+        formatMenu.addItem(withTitle: "Prevent Editing", action: #selector(TextDocument.toggleEditingProtection(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Wrap to Page", action: #selector(TextDocument.togglePageWrap(_:)), keyEquivalent: "")
         formatMenu.addItem(withTitle: "Allow Hyphenation", action: #selector(TextDocument.toggleHyphenation(_:)), keyEquivalent: "")
         let layoutOrientationItem = NSMenuItem(title: "Make Layout Vertical", action: #selector(TextDocument.toggleLayoutOrientation(_:)), keyEquivalent: "")
         formatMenu.addItem(layoutOrientationItem)
-        formatMenu.addItem(withTitle: "Prevent Editing", action: #selector(TextDocument.toggleEditingProtection(_:)), keyEquivalent: "")
+        formatMenu.addItem(withTitle: "List…", action: #selector(NSTextView.orderFrontListPanel(_:)), keyEquivalent: "")
+        formatMenu.addItem(withTitle: "Table…", action: #selector(TextDocument.insertTable(_:)), keyEquivalent: "")
         main.addItem(formatItem)
         formatItem.submenu = formatMenu
 
