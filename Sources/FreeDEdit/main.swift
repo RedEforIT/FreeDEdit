@@ -86,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         let editMenu = NSMenu(title: "Edit")
+        editMenu.delegate = self
         let undoItem = NSMenuItem(title: "Undo", action: #selector(undo(_:)), keyEquivalent: "z")
         undoItem.target = self
         editMenu.addItem(undoItem)
@@ -438,6 +439,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for item in menu.items {
             let action = item.action.map(NSStringFromSelector) ?? ""
             switch action {
+            case "undo:":
+                item.title = editor.undoManager?.undoMenuItemTitle ?? "Undo"
+                item.isEnabled = editor.undoManager?.canUndo ?? false
+            case "redo:":
+                item.title = editor.undoManager?.redoMenuItemTitle ?? "Redo"
+                item.isEnabled = editor.undoManager?.canRedo ?? false
             case "toggleRichPlainText:":
                 item.isEnabled = editor.isEditable
                 item.title = editor.isRichText ? "Make Plain Text" : "Make Rich Text"
