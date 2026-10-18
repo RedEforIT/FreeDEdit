@@ -516,6 +516,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.autoenablesItems = false
         for item in menu.items {
             let action = item.action.map(NSStringFromSelector) ?? ""
+            if item.submenu != nil && (item.title == "Paragraph" || item.title == "Selection") {
+                item.isEnabled = editor.selectedRange().length > 0
+            }
             switch action {
             case "undo:":
                 item.title = editor.undoManager?.undoMenuItemTitle ?? "Undo"
@@ -533,10 +536,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.isEnabled = editor.selectedRange().length > 0
             case "applyHighlight:":
                 item.target = document
-                item.isEnabled = editor.isRichText && editor.isEditable && editor.selectedRange().length > 0
+                item.isEnabled = editor.isRichText && editor.isEditable
             case "copyFont:":
                 item.target = editor
-                item.isEnabled = editor.isRichText && editor.selectedRange().length > 0
+                item.isEnabled = editor.isRichText
             case "pasteFont:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
@@ -551,10 +554,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "raiseBaseline:", "lowerBaseline:":
                 item.target = editor
-                item.isEnabled = editor.isRichText && editor.isEditable && editor.selectedRange().length > 0
+                item.isEnabled = editor.isRichText && editor.isEditable
             case "outline:":
                 item.target = editor
-                item.isEnabled = editor.isRichText && editor.isEditable && editor.selectedRange().length > 0
+                item.isEnabled = editor.isRichText && editor.isEditable
             case "makeBaseWritingDirectionNatural:", "makeBaseWritingDirectionLeftToRight:", "makeBaseWritingDirectionRightToLeft:",
                  "makeTextWritingDirectionNatural:", "makeTextWritingDirectionLeftToRight:", "makeTextWritingDirectionRightToLeft:":
                 item.target = editor
@@ -565,7 +568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "useStandardLigatures:", "useAllLigatures:", "turnOffLigatures:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
-            case "subscript:", "superscript:":
+            case "unscript:", "subscript:", "superscript:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "toggleTraditionalCharacterShape:":
