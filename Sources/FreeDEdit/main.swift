@@ -179,6 +179,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         baselineMenu.addItem(withTitle: "Lower Baseline", action: #selector(NSTextView.lowerBaseline(_:)), keyEquivalent: "")
         baselineItem.submenu = baselineMenu
         formatMenu.addItem(baselineItem)
+        let directionItem = NSMenuItem(title: "Writing Direction", action: nil, keyEquivalent: "")
+        let directionMenu = NSMenu(title: "Writing Direction")
+        directionMenu.delegate = self
+        directionMenu.addItem(withTitle: "Natural", action: #selector(NSResponder.makeBaseWritingDirectionNatural(_:)), keyEquivalent: "")
+        directionMenu.addItem(withTitle: "Left to Right", action: #selector(NSResponder.makeBaseWritingDirectionLeftToRight(_:)), keyEquivalent: "")
+        directionMenu.addItem(withTitle: "Right to Left", action: #selector(NSResponder.makeBaseWritingDirectionRightToLeft(_:)), keyEquivalent: "")
+        directionItem.submenu = directionMenu
+        formatMenu.addItem(directionItem)
         if #available(macOS 15.0, *) {
             let highlightItem = NSMenuItem(title: "Highlight", action: nil, keyEquivalent: "")
             let highlightMenu = NSMenu(title: "Highlight")
@@ -505,6 +513,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case "outline:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable && editor.selectedRange().length > 0
+            case "makeBaseWritingDirectionNatural:", "makeBaseWritingDirectionLeftToRight:", "makeBaseWritingDirectionRightToLeft:":
+                item.target = editor
+                item.isEnabled = editor.isRichText && editor.isEditable
             case "toggleRichPlainText:":
                 item.isEnabled = editor.isEditable
                 item.title = editor.isRichText ? "Make Plain Text" : "Make Rich Text"
