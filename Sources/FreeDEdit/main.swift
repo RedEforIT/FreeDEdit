@@ -1990,8 +1990,10 @@ extension TextDocument: NSToolbarDelegate {
     }
 
     private func makeToolbarColorControl(_ attribute: ToolbarColorAttribute) -> NSView {
-        let group = NSView(frame: NSRect(x: 0, y: 0, width: 68, height: 54))
-        let icon = NSImageView(frame: NSRect(x: 27, y: 30, width: 14, height: 14))
+        // Keep these controls on one compact toolbar row. Tall custom views
+        // overlap the title bar in NSToolbar, especially in compact windows.
+        let group = NSView(frame: NSRect(x: 0, y: 0, width: 64, height: 22))
+        let icon = NSImageView(frame: NSRect(x: 0, y: 6, width: 10, height: 10))
         icon.image = NSImage(systemSymbolName: attribute.symbol, accessibilityDescription: attribute.title)
         icon.contentTintColor = toolbarColor(for: attribute)
         icon.setAccessibilityLabel("\(attribute.title) color")
@@ -1999,14 +2001,7 @@ extension TextDocument: NSToolbarDelegate {
         icon.imageScaling = .scaleProportionallyDown
         group.addSubview(icon)
 
-        let title = NSTextField(labelWithString: attribute.title)
-        title.frame = NSRect(x: 0, y: 20, width: 68, height: 10)
-        title.font = .systemFont(ofSize: 8, weight: .medium)
-        title.textColor = .secondaryLabelColor
-        title.alignment = .center
-        group.addSubview(title)
-
-        let swatch = NSView(frame: NSRect(x: 22, y: 14, width: 24, height: 3))
+        let swatch = NSView(frame: NSRect(x: 0, y: 2, width: 10, height: 2))
         swatch.wantsLayer = true
         swatch.layer?.backgroundColor = toolbarColor(for: attribute).cgColor
         swatch.layer?.cornerRadius = 2
@@ -2019,22 +2014,22 @@ extension TextDocument: NSToolbarDelegate {
         apply.bezelStyle = .rounded
         apply.bezelColor = .systemBlue
         apply.contentTintColor = .white
-        apply.font = .systemFont(ofSize: 9, weight: .semibold)
+        apply.font = .systemFont(ofSize: 8, weight: .semibold)
         apply.controlSize = .mini
         apply.toolTip = "Apply \(attribute.title.lowercased()) color to selected text or future typing"
         apply.setAccessibilityLabel("Apply \(attribute.title.lowercased()) color")
         apply.setAccessibilityHelp(apply.toolTip)
-        apply.frame = NSRect(x: 0, y: 0, width: 44, height: 18)
+        apply.frame = NSRect(x: 12, y: 2, width: 34, height: 18)
 
         let choose = NSButton(title: "", target: self, action: #selector(showToolbarColorMenu(_:)))
         choose.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: "Choose color")
         choose.tag = attribute.rawValue
         choose.bezelStyle = .rounded
         choose.controlSize = .mini
-        choose.image?.size = NSSize(width: 9, height: 9)
+        choose.image?.size = NSSize(width: 8, height: 8)
         choose.toolTip = "Choose \(attribute.title.lowercased()) color"
         choose.setAccessibilityLabel("Choose \(attribute.title.lowercased()) color")
-        choose.frame = NSRect(x: 46, y: 0, width: 20, height: 18)
+        choose.frame = NSRect(x: 48, y: 2, width: 16, height: 18)
         group.addSubview(apply)
         group.addSubview(choose)
         group.setAccessibilityElement(true)
