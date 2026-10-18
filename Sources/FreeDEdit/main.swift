@@ -220,6 +220,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         baselineMenu.addItem(withTitle: "Lower", action: #selector(NSTextView.lowerBaseline(_:)), keyEquivalent: "")
         baselineItem.submenu = baselineMenu
         fontMenu.addItem(baselineItem)
+        let characterShapeItem = NSMenuItem(title: "Character Shape", action: nil, keyEquivalent: "")
+        let characterShapeMenu = NSMenu(title: "Character Shape")
+        characterShapeMenu.delegate = self
+        characterShapeMenu.addItem(withTitle: "Traditional Form", action: #selector(NSTextView.toggleTraditionalCharacterShape(_:)), keyEquivalent: "")
+        characterShapeItem.submenu = characterShapeMenu
+        fontMenu.addItem(characterShapeItem)
         fontMenu.addItem(.separator())
         fontMenu.addItem(withTitle: "Show Colors", action: #selector(NSApplication.orderFrontColorPanel(_:)), keyEquivalent: "")
         fontMenu.addItem(withTitle: "Copy Style", action: #selector(NSText.copyFont(_:)), keyEquivalent: "")
@@ -570,6 +576,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "subscript:", "superscript:":
+                item.target = editor
+                item.isEnabled = editor.isRichText && editor.isEditable
+            case "toggleTraditionalCharacterShape:":
                 item.target = editor
                 item.isEnabled = editor.isRichText && editor.isEditable
             case "toggleRichPlainText:":
