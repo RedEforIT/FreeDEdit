@@ -109,7 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         editMenu.addItem(withTitle: "Add Link…", action: #selector(TextDocument.insertLink(_:)), keyEquivalent: "k")
         let findItem = NSMenuItem(title: "Find", action: nil, keyEquivalent: "")
         let findMenu = NSMenu(title: "Find")
-        for (title, action, key, tag) in [("Find…", "performFindPanelAction:", "f", NSFindPanelAction.showFindPanel.rawValue), ("Find Next", "performFindPanelAction:", "g", NSFindPanelAction.next.rawValue), ("Find Previous", "performFindPanelAction:", "G", NSFindPanelAction.previous.rawValue), ("Use Selection for Find", "performFindPanelAction:", "e", NSFindPanelAction.setFindString.rawValue), ("Jump to Selection", "centerSelectionInVisibleArea:", "j", 0), ("Select Paragraph", "selectParagraph:", "", 0)] {
+        for (title, action, key, tag) in [("Find…", "performFindPanelAction:", "f", NSFindPanelAction.showFindPanel.rawValue), ("Find Next", "performFindPanelAction:", "g", NSFindPanelAction.next.rawValue), ("Find Previous", "performFindPanelAction:", "G", NSFindPanelAction.previous.rawValue), ("Use Selection for Find", "performFindPanelAction:", "e", NSFindPanelAction.setFindString.rawValue), ("Jump to Selection", "centerSelectionInVisibleArea:", "j", 0), ("Select Line…", "selectLine:", "", 0)] {
             let item = NSMenuItem(title: title, action: Selector(action), keyEquivalent: key)
             item.tag = Int(tag)
             findMenu.addItem(item)
