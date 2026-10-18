@@ -1,4 +1,5 @@
 import AppKit
+import CoreFoundation
 import UniformTypeIdentifiers
 
 @main
@@ -477,9 +478,10 @@ final class SettingsWindowController: NSWindowController {
             row.addArrangedSubview(NSTextField(labelWithString: labelText))
             let popup = NSPopUpButton(frame: .zero, pullsDown: false)
             popup.identifier = NSUserInterfaceItemIdentifier(key)
-            popup.addItems(withTitles: ["Automatic", "Unicode (UTF-8)", "Unicode (UTF-16)", "Western (Mac OS Roman)"])
+            let options = key == "PlainTextEncoding" ? TextDocument.openEncodings : TextDocument.encodings
+            popup.addItems(withTitles: options.map(\.name))
             let value = UserDefaults.standard.integer(forKey: key)
-            popup.selectItem(at: [0, 4, 10, 30].firstIndex(of: value) ?? 0)
+            popup.selectItem(at: options.firstIndex(where: { Int($0.value) == value }) ?? 0)
             row.addArrangedSubview(popup)
             openSave.addArrangedSubview(row)
             encodingPopups.append(popup)
@@ -583,9 +585,9 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func encodingChanged(_ sender: NSPopUpButton) {
         guard let key = sender.identifier?.rawValue else { return }
-        let values = [0, 4, 10, 30]
-        guard values.indices.contains(sender.indexOfSelectedItem) else { return }
-        UserDefaults.standard.set(values[sender.indexOfSelectedItem], forKey: key)
+        let options = key == "PlainTextEncoding" ? TextDocument.openEncodings : TextDocument.encodings
+        guard options.indices.contains(sender.indexOfSelectedItem) else { return }
+        UserDefaults.standard.set(Int(options[sender.indexOfSelectedItem].value), forKey: key)
     }
 
     @objc private func stringSettingChanged(_ sender: NSPopUpButton) {
@@ -1113,9 +1115,13 @@ final class TextDocument: NSDocument {
             isPlainText = false
         } else {
             let selected = openOptions?.encoding.rawValue ?? UInt(UserDefaults.standard.integer(forKey: "PlainTextEncoding"))
-            var candidates: [String.Encoding] = []
-            if selected != 0 { candidates.append(String.Encoding(rawValue: selected)) }
-            candidates.append(contentsOf: [.utf8, .utf16, .utf16LittleEndian, .utf16BigEndian, .macOSRoman])
+            let automatic = Self.detectPlainText(data)
+            var candidates = selected == 0 ? [] : [String.Encoding(rawValue: selected)]
+            if let automatic { candidates.append(automatic.1) }
+            if data.contains(where: { (0x80...0x9F).contains($0) }) {
+                candidates.append(.windowsCP1252)
+            }
+            candidates.append(.macOSRoman)
             var decoded: (String, String.Encoding)?
             for encoding in candidates where decoded == nil {
                 if let value = String(data: data, encoding: encoding) { decoded = (value, encoding) }
@@ -1125,6 +1131,45 @@ final class TextDocument: NSDocument {
             plainTextEncoding = result.1
             isPlainText = true
         }
+    }
+
+    /// Returns a conservative automatic decoding. BOMs take priority, then
+    /// valid UTF-8; UTF-16/32 without BOM are only inferred from zero-byte patterns.
+    private static func detectPlainText(_ data: Data) -> (String, String.Encoding)? {
+        let bytes = Array(data.prefix(4))
+        let bomEncodings: [([UInt8], String.Encoding)] = [
+            ([0x00, 0x00, 0xFE, 0xFF], .utf32BigEndian),
+            ([0xFF, 0xFE, 0x00, 0x00], .utf32LittleEndian),
+            ([0xEF, 0xBB, 0xBF], .utf8),
+            ([0xFE, 0xFF], .utf16BigEndian),
+            ([0xFF, 0xFE], .utf16LittleEndian)
+        ]
+        for (bom, encoding) in bomEncodings where bytes.starts(with: bom) {
+            if let decoded = String(data: data, encoding: encoding) { return (decoded, encoding) }
+        }
+        if let decoded = String(data: data, encoding: .utf8) { return (decoded, .utf8) }
+
+        let raw = Array(data)
+        if raw.count >= 4 {
+            let evenZeros = stride(from: 0, to: raw.count, by: 2).filter { raw[$0] == 0 }.count
+            let oddZeros = stride(from: 1, to: raw.count, by: 2).filter { raw[$0] == 0 }.count
+            if raw.count.isMultiple(of: 4) {
+                let zeroCounts = (0..<4).map { offset in
+                    stride(from: offset, to: raw.count, by: 4).filter { raw[$0] == 0 }.count
+                }
+                if zeroCounts[0] + zeroCounts[1] + zeroCounts[2] > raw.count / 2,
+                   let decoded = String(data: data, encoding: .utf32BigEndian) { return (decoded, .utf32BigEndian) }
+                if zeroCounts[1] + zeroCounts[2] + zeroCounts[3] > raw.count / 2,
+                   let decoded = String(data: data, encoding: .utf32LittleEndian) { return (decoded, .utf32LittleEndian) }
+            }
+            if oddZeros > raw.count / 5, let decoded = String(data: data, encoding: .utf16BigEndian) {
+                return (decoded, .utf16BigEndian)
+            }
+            if evenZeros > raw.count / 5, let decoded = String(data: data, encoding: .utf16LittleEndian) {
+                return (decoded, .utf16LittleEndian)
+            }
+        }
+        return nil
     }
 
     override func read(from fileWrapper: FileWrapper, ofType typeName: String) throws {
@@ -1168,14 +1213,42 @@ final class TextDocument: NSDocument {
         ("Automatic", 0),
         ("Unicode (UTF-8)", String.Encoding.utf8.rawValue),
         ("Unicode (UTF-16)", String.Encoding.utf16.rawValue),
-        ("Western (Mac OS Roman)", String.Encoding.macOSRoman.rawValue)
+        ("Unicode (UTF-32)", String.Encoding.utf32.rawValue)
+    ] + legacyEncodings
+
+    private static func ianaEncoding(_ name: String) -> String.Encoding? {
+        let cfEncoding = CFStringConvertIANACharSetNameToEncoding(name as CFString)
+        guard cfEncoding != kCFStringEncodingInvalidId else { return nil }
+        let rawValue = CFStringConvertEncodingToNSStringEncoding(cfEncoding)
+        return String.Encoding(rawValue: rawValue)
+    }
+
+    private static let legacyEncodings: [(name: String, value: UInt)] = [
+        ("Western (Mac OS Roman)", String.Encoding.macOSRoman.rawValue),
+        ("Western (Windows Latin 1)", String.Encoding.windowsCP1252.rawValue),
+        ("Western (ISO Latin 1)", String.Encoding.isoLatin1.rawValue),
+        ("Central European (Windows 1250)", String.Encoding.windowsCP1250.rawValue),
+        ("Cyrillic (Windows 1251)", String.Encoding.windowsCP1251.rawValue),
+        ("Greek (Windows 1253)", String.Encoding.windowsCP1253.rawValue),
+        ("Turkish (Windows 1254)", String.Encoding.windowsCP1254.rawValue),
+        ("Hebrew (Windows 1255)", ianaEncoding("windows-1255")?.rawValue ?? 0),
+        ("Arabic (Windows 1256)", ianaEncoding("windows-1256")?.rawValue ?? 0),
+        ("Baltic (Windows 1257)", ianaEncoding("windows-1257")?.rawValue ?? 0),
+        ("Vietnamese (Windows 1258)", ianaEncoding("windows-1258")?.rawValue ?? 0),
+        ("Thai (Windows 874)", ianaEncoding("windows-874")?.rawValue ?? 0),
+        ("Japanese (Shift JIS)", ianaEncoding("shift_jis")?.rawValue ?? 0),
+        ("Japanese (EUC)", String.Encoding.japaneseEUC.rawValue),
+        ("Japanese (ISO 2022 JP)", String.Encoding.iso2022JP.rawValue),
+        ("Simplified Chinese (GBK)", ianaEncoding("gbk")?.rawValue ?? 0),
+        ("Traditional Chinese (Big5)", ianaEncoding("big5")?.rawValue ?? 0),
+        ("Korean (EUC KR)", ianaEncoding("euc-kr")?.rawValue ?? 0)
     ]
 
     static let encodings: [(name: String, value: UInt)] = [
         ("Unicode (UTF-8)", String.Encoding.utf8.rawValue),
         ("Unicode (UTF-16)", String.Encoding.utf16.rawValue),
-        ("Western (Mac OS Roman)", String.Encoding.macOSRoman.rawValue)
-    ]
+        ("Unicode (UTF-32)", String.Encoding.utf32.rawValue)
+    ] + legacyEncodings
 
     override func windowControllerDidLoadNib(_ windowController: NSWindowController) {
         super.windowControllerDidLoadNib(windowController)
