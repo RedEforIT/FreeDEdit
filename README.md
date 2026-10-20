@@ -1,3 +1,7 @@
+# ⚠️ IF YOU ARE ON GITHUB THIS IS A READONLY MIRROR GO TO OFFICAL REPO FOR CREATING ISSUES AND PULLS 
+# ISSUES AND PULL REQUESTS WILL BE IGNORED.
+# OFFICIAL REPO: https://git.initstack.org/RedEforIT/freededit
+
 # FreeDEdit
 
 A Swift and AppKit text editor inspired by macOS TextEdit, built from observed behavior and public macOS APIs. It supports editable plain and rich text, native find/replace, formatting controls, common text document formats, and preferences for new documents.
